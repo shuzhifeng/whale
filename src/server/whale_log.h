@@ -13,16 +13,7 @@
 namespace whale {
 
 #define ENTRY_LOG_FILE_MODE		S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH
-#define ENTRY_LOG_FILE_FLAGS	O_CREAT | O_APPEND
-
-
-/* simple logging utility */
-void __log_error_print(char * filename, const char * func, int line,
-					  const char *fmt, ...);
-
-#define log_error(...)\
-	__log_stderr_print(__FILE__, __func__, __LINE__, __VA_ARGS__);
-
+#define ENTRY_LOG_FILE_FLAGS	O_CREAT | O_RDWR
 
 typedef struct log_entry {
 	w_int_t	index;
@@ -41,12 +32,12 @@ public:
 	/*
 	* Bring the log entries in the log file into memory.
 	*/
-	w_int_t init();
+	w_rc_t init();
 
 	/*
 	* Write log entries(not in the log file) into log file.
 	*/
-	w_int_t write();
+	w_rc_t write();
 
 	std::vector<log_entry_t> & get_entries();
 

@@ -6,7 +6,7 @@
 
 namespace whale {
 
-	w_int_t config::init() {
+	w_rc_t config::init() {
 		
 		return WHALE_GOOD;
 	}

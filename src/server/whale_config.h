@@ -19,7 +19,7 @@ namespace whale {
 		/*
 		* Parse the configuration file and fill up fields of this class.
 		*/
-		w_int_t init();
+		w_rc_t init();
 
 	private:
 		std::string cfg_file;

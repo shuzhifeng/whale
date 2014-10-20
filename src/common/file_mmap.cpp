@@ -26,20 +26,33 @@ namespace whale {
 		if (addr == MAP_FAILED) {
 			log_error("failed to mmap \"%s\" : %s", map_file.c_str(), 
 													strerror(errno));
-			return WHALE_ERROR;
+			return WHALE_MMAP_ERROR;
 		}
 
+		mapped = true;
 		return WHALE_GOOD;
 	}
 
 	w_rc_t file_mmap::unmap(){
-		if (::munmap(addr, size) == -1) {
-			log_error("failed to unmmap \"%s\": %s", map_file.c_str(),
+		if (mapped && ::munmap(addr, size) == -1) {
+			log_error("failed to munmap \"%s\": %s", map_file.c_str(),
 											   		 strerror(errno));
-			return WHALE_ERROR;
+			return WHALE_MMAP_ERROR;
 		}
 
-		::close(fd);
+		if(mapped)
+			::close(fd);
+
+		mapped = false;
+		return WHALE_GOOD;
+	}
+
+	w_rc_t file_mmap::sync() {
+		if(mapped && ::msync(addr, size, MS_SYNC) == -1){
+			log_error("failed to msync \"%s\": %s", map_file.c_str(),
+											   		 strerror(errno));
+			return WHALE_MMAP_ERROR;
+		}
 
 		return WHALE_GOOD;
 	}

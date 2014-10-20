@@ -12,41 +12,41 @@
 
 namespace whale {
 
-#define ENTRY_LOG_FILE_MODE		S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH
-#define ENTRY_LOG_FILE_FLAGS	O_CREAT | O_RDWR
+	#define ENTRY_LOG_FILE_MODE		S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH
+	#define ENTRY_LOG_FILE_FLAGS	O_CREAT | O_RDWR
 
-typedef struct log_entry {
-	w_int_t	index;
-	w_int_t	term;
-	std::string	data;
-} log_entry_t;
+	typedef struct log_entry {
+		w_int_t	index;
+		w_int_t	term;
+		std::string	data;
+	} log_entry_t;
 
-#define LOG_ENTRY_SENTINEL log_entry_t{-1, -1, ""}
+	#define LOG_ENTRY_SENTINEL log_entry_t{0, 0, ""}
 
-class logger {
-public:
+	class logger {
+	public:
 
-	logger(std::string log_filename):log_file(log_filename),
-		  fd(-1), entries({LOG_ENTRY_SENTINEL}) {}
+		logger(std::string log_filename):log_file(log_filename),
+			  fd(-1), entries({LOG_ENTRY_SENTINEL}) {}
 
-	/*
-	* Bring the log entries in the log file into memory.
-	*/
-	w_rc_t init();
+		/*
+		* Bring the log entries in the log file into memory.
+		*/
+		w_rc_t init();
 
-	/*
-	* Write log entries(not in the log file) into log file.
-	*/
-	w_rc_t write();
+		/*
+		* Write log entries(not in the log file) into log file.
+		*/
+		w_rc_t write();
 
-	std::vector<log_entry_t> & get_entries();
+		std::vector<log_entry_t> & get_entries();
 
 
-private:
-	std::string					log_file;
-	w_int_t 					fd;
-	std::vector<log_entry_t> 	entries;
-};
+	private:
+		std::string					log_file;
+		w_int_t 					fd;
+		std::vector<log_entry_t> 	entries;
+	};
 
 }
 #endif

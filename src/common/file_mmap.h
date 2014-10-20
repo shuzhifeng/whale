@@ -3,8 +3,6 @@
 */
 #include <string>
 
-#include <sys/mman.h>
-
 #include <define.h>
 
 namespace whale {
@@ -18,19 +16,25 @@ public:
 			  w_int_t prot_, w_int_t flags_,
 			  off_t off_ = 0, void * hint_ = nullptr)
 		:map_file(map_file_), size(size_), prot(prot_), flags(flags_),
-		 off(off_), hint(hint_), addr(nullptr), fd(-1) {}
+		 off(off_), hint(hint_), addr(nullptr), fd(-1), mapped(false) {}
 
 	/*
 	* open @map_file and mmap it.
-	* Return: WHALE_GOOD on success, WHALE_ERROR on failure.
+	* Return: WHALE_GOOD on success, WHALE_MAP_ERROR or WHALE_ERROR on failure.
 	*/
 	w_rc_t map();
 
 	/*
 	* unmmap @map_file and close @map_file .
-	* Return: WHALE_GOOD on success, WHALE_ERROR on failure.
+	* Return: WHALE_GOOD on success, WHALE_MAP_ERROR on failure.
 	*/
 	w_rc_t unmap();
+
+	/*
+	* sync the @map_file with memory map.
+	* Return: WHALE_GOOD on success, WHALE_MAP_ERROR on failure.
+	*/
+	w_rc_t sync();
 
 	void * get_addr() { return addr; }
 	
@@ -43,6 +47,7 @@ private:
 	void		*hint;
 	void 		*addr;
 	w_int_t		fd;
+	bool		mapped;
 };
 
 }

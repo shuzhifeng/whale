@@ -53,8 +53,8 @@ namespace whale {
 		/* reached eof, treat it as the last line*/
 		if (payload != CONF_BUFSIZE) {
 			eof = true;
-			/* strchr might reach a spot after buf + payload */
-			memset(buf + payload, 0, CONF_BUFSIZE - payload);
+			/* strchr might reach a stale '\n' after buf + payload, clean it up*/
+			buf[payload] = '\0';
 		}
 
 		start = end = buf;

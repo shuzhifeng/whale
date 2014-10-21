@@ -8,7 +8,7 @@
 namespace whale {
 
 #define MMAP_FILE_MODE		S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH
-#define MMAP_FILE_FLAGS		O_CREAT | O_RDWR
+#define MMAP_FILE_FLAGS		O_RDWR
 
 class file_mmap {
 public:

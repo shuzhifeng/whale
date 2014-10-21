@@ -13,12 +13,21 @@
 
 namespace whale {
 	w_rc_t file_mmap::map() {
+		bool first_boot = false;
 		fd = ::open(map_file.c_str(), MMAP_FILE_FLAGS, MMAP_FILE_MODE);
 
 		if (fd == -1) {
-			log_error("failed to open \"%s\" : %s", map_file.c_str(), 
-													strerror(errno));
-			return WHALE_ERROR;
+
+			if (errno == ENOENT) {
+				fd = ::open(map_file.c_str(), MMAP_FILE_FLAGS | O_CREAT, MMAP_FILE_MODE);
+				if (fd == -1) {
+					log_error("failed to open \"%s\" : %s", map_file.c_str(), 
+															strerror(errno));
+					return WHALE_ERROR;
+				}
+				first_boot = true;
+			}
+
 		}
 
 		addr = ::mmap(hint, size, prot, flags, fd, off);
@@ -30,6 +39,11 @@ namespace whale {
 		}
 
 		mapped = true;
+
+		if (first_boot) {
+			memset(addr, 0, size);
+		}
+		
 		return WHALE_GOOD;
 	}
 

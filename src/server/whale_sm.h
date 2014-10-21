@@ -5,6 +5,8 @@
 
 #include <sys/mman.h>
 
+#include <cheetah/event.h>
+
 #include <define.h>
 
 #include <file_mmap.h>
@@ -12,12 +14,19 @@
 #include <whale_config.h>
 
 namespace whale {
+	typedef struct peer_s{
+		w_addr_t 		addr;
+		struct event 	e;
+		w_int_t			next_idx;
+		w_int_t			match_idx;
+	} peer_t;
 
 	/* stuff need to stay persistent on disk*/
-	typedef struct {
+	typedef struct file_mapped_s{
 		w_int_t 	current_term;	/* current term */
-		w_addr_t	voted_for;		/* candidate veted for */
+		peer_t		voted_for;		/* candidate veted for */
 	} file_mapped_t;
+
 
 	#define FOLLOWER	0
 	#define CANDIDATE	1
@@ -29,8 +38,9 @@ namespace whale {
 	class state_machine {
 	public:
 
-		state_machine(std::string map_file)
-			: state(FOLLOWER) {}
+		state_machine(std::unique_ptr<logger> &log)
+			: state(FOLLOWER), commit_index(0), last_applied(0)
+		{}
 
 		/*
 		* initialize the state machine.
@@ -45,8 +55,11 @@ namespace whale {
 		}
 		std::unique_ptr<file_mmap> 		map;
 		std::unique_ptr<logger>			log;
-		std::unique_ptr<config> 		cfg;
+		std::shared_ptr<config> 		cfg;
 		w_int_t							state;
+		w_int_t							commit_index;
+		w_int_t							last_applied;
+		
 	};
 
 }

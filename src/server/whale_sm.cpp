@@ -38,7 +38,6 @@ namespace whale {
 		if (rc != WHALE_GOOD)
 			return rc;
 
-
 		return WHALE_GOOD;
 	}
 }

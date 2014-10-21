@@ -5,6 +5,8 @@
 #ifndef WHALE_SERVER_H_
 #define WHALE_SERVER_H_
 
+#include <memory>
+
 #include <string>
 
 #include <define.h>
@@ -18,8 +20,8 @@ namespace whale {
 		whale_server(std::string cfg_file);
 
 	private:
-		unique_ptr<logger> log;
-		unique_ptr<config> cfg;
+		std::unique_ptr<logger> log;
+		std::shared_ptr<config> cfg;
 	};
 
 }

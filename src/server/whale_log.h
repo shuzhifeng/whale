@@ -16,8 +16,8 @@ namespace whale {
 	#define ENTRY_LOG_FILE_FLAGS	O_CREAT | O_RDWR
 
 	typedef struct log_entry {
-		w_int_t	index;
-		w_int_t	term;
+		w_int_t		index;
+		w_int_t		term;
 		std::string	data;
 	} log_entry_t;
 

@@ -41,7 +41,7 @@ namespace whale {
 	#define MAP_FILE_FLAGS	MAP_SHARED
 
 	#define DEFAULT_LISTEN_PORT 29999
-
+	#define WHALE_BACKLOG       10
 	typedef struct {
 		bool operator()(const w_addr_t &a1, const w_addr_t &a2) {
 			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr;
@@ -71,12 +71,12 @@ namespace whale {
 		std::string                     cfg_file;
 		std::map<w_addr_t, peer_t,
 				 WADDR_PRED>            peers;
-		struct reactor                  r;
 		w_int_t							state;
 		w_int_t							commit_index;
 		w_int_t							last_applied;
+		struct reactor                  r;
+		struct event                    listen_event;
 		w_int_t                         listen_port;
-
 	};
 
 }

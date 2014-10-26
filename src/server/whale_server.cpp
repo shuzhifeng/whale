@@ -10,10 +10,40 @@
 
 #include <log.h>
 
+#include <cheetah/reactor.h>
+
 #include <whale_server.h>
 
 namespace whale {
-	static auto is_ip = [](std::string str)->bool {
+
+	el_socket_t make_listen_fd(w_addr_t * addr) {
+		el_socket_t fd;
+
+		fd = ::socket(AF_INET, SOCK_STREAM, 0);
+
+		if (fd == -1) {
+			log_error("failed to ::socket: %s", strerror(errno));
+			return -1;
+		}
+			return -1;
+
+		if (::bind(fd, (struct sockaddr*)&addr->addr,
+		           sizeof(struct sockaddr))) {
+			log_error("failed to ::bind: %s", strerror(errno));
+			return -1;
+		}
+		
+		if (::listen(fd, WHALE_BACKLOG)) {
+			log_error("failed to ::listen: %s", strerror(errno));
+			return -1;
+		}
+
+		return fd;
+	}
+	static void server_callback(el_socket_t fd, short res_flags, void *arg) {
+
+	}
+	static bool is_ip(std::string str) {
 		char *  p = strtok(const_cast<char*>(str.data()), ".");
 		w_int_t cnt = 0, val;
 
@@ -28,7 +58,7 @@ namespace whale {
 		}
 
 		return cnt == 4;
-	};
+	}
 
 	w_rc_t whale_server::init() {
 		w_rc_t rc;
@@ -108,7 +138,7 @@ namespace whale {
 			*port_p = '\0';
 
 			if (p)
-				sscanf(port_p + 1, "%d", &port);
+				::sscanf(port_p + 1, "%d", &port);
 			else
 				port = listen_port;
 
@@ -118,7 +148,7 @@ namespace whale {
 			}
 
 			/* convert to network byte order */
-			peer.addr.addr.sin_port = htons(port);
+			peer.addr.addr.sin_port = ::htons(port);
 
 			inet_aton(p, &peer.addr.addr.sin_addr);
 
@@ -129,6 +159,27 @@ namespace whale {
 			this->peers.insert(std::pair<w_addr_t, peer_t>(peer.addr, peer));
 
 			p = strtok(NULL, " ");
+		}
+
+		el_socket_t fd;
+		w_addr_t    server_addr;
+
+		server_addr.addr.sin_family = AF_INET;
+		server_addr.addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		server_addr.addr.sin_port = htons(listen_port);
+
+		if ((fd = make_listen_fd(&server_addr)) == -1) {
+			log_error("failed to make_listen_fd: %s", strerror(errno));
+			return WHALE_ERROR;
+		}
+
+		event_set(&this->listen_event, fd, E_READ, server_callback, this);
+
+		reactor_init_with_timer(&r, NULL);
+
+		if (reactor_add_event(&this->r, &this->listen_event) == -1) {
+			log_error("failed to reactor_add_event: %s", strerror(errno));
+			return WHALE_ERROR;
 		}
 
 		return WHALE_GOOD;

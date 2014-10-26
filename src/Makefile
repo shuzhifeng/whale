@@ -1,5 +1,5 @@
 #sources
-WHALE_SRC = server/whale_config.cpp server/whale_log.cpp server/whale_server.cpp server/whale_message.cpp common/log.cpp common/file_mmap.cpp
+WHALE_SRC = server/whale_config.cpp server/whale_log.cpp server/whale_message.cpp server/whale_server.cpp common/log.cpp common/file_mmap.cpp
 #object files
 WHALE_OBJ = $(WHALE_SRC:.cpp=.o)
 #executable

@@ -39,9 +39,13 @@ namespace whale {
 		*/
 		w_rc_t write();
 
-		std::vector<log_entry_t> & get_entries();
+		std::vector<log_entry_t> & get_entries() {
+			return entries;
+		}
 
-
+		w_int_t get_last_log_idx() {
+			return entries.back().index;
+		}
 	private:
 		std::string					log_file;
 		w_int_t 					fd;

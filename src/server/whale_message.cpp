@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#include <xson/parser.h>
+
 #include <whale_message.h>
 
 namespace whale {
@@ -143,21 +145,160 @@ namespace whale {
 
 	request_vote_t *
 	make_request_vote_from_message(message_t & m) {
-		return nullptr;
+		struct xson_context              ctx;
+		struct xson_element             *root;
+		std::unique_ptr<request_vote_t>  r;
+		char                             ip_buf[50] = {0};
+		w_int_t                          port;
+		
+		if (xson_init(&ctx, m.data))
+			return nullptr;
+		
+		if (xson_parse(&ctx, &root) != XSON_RESULT_SUCCESS)
+			return nullptr;
+
+		r = std::unique_ptr<request_vote_t>(new request_vote_t);
+
+		if (xson_get_int_by_expr(root, "term", &r->term))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "last_log_idx", &r->last_log_idx))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "last_log_term", &r->last_log_term))
+			return nullptr;
+
+		if (xson_get_string_by_expr(root, "candidate_id.ip", ip_buf, sizeof(ip_buf)))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "candidate_id.port", &port))
+			return nullptr;
+
+		inet_aton(ip_buf, &r->candidate_id.addr.sin_addr);
+		r->candidate_id.addr.sin_port = port;
+
+		return r.release();
 	}
 
 	request_vote_res_t *
 	make_request_vote_res_from_message(message_t & m) {
-		return nullptr;
+		struct xson_context                  ctx;
+		struct xson_element                 *root;
+		std::unique_ptr<request_vote_res_t>  r;
+		w_int_t                              vote_granted;
+
+		if (xson_init(&ctx, m.data))
+			return nullptr;
+		
+		if (xson_parse(&ctx, &root) != XSON_RESULT_SUCCESS)
+			return nullptr;
+
+		r = std::unique_ptr<request_vote_res_t>(new request_vote_res_t);
+
+		if (xson_get_int_by_expr(root, "term", &r->term))
+			return nullptr;
+		
+		if (xson_get_int_by_expr(root, "vote_granted", &vote_granted))
+			return nullptr;
+
+		r->vote_granted = vote_granted;
+
+		return r.release();
 	}
 
 	append_entries_t *
 	make_append_entries_from_message(message_t & m) {
-		return nullptr;
+		struct xson_context                ctx;
+		struct xson_element               *root;
+		std::unique_ptr<append_entries_t>  a;
+		char                               ip_buf[50] = {0};
+		char                               expr_buf[50] = {0};
+		w_int_t                            port;
+		w_int_t                            array_size;
+
+		if (xson_init(&ctx, m.data))
+			return nullptr;
+		
+		if (xson_parse(&ctx, &root) != XSON_RESULT_SUCCESS)
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "term", &a->term))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "prev_log_idx", &a->prev_log_idx))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "prev_log_term", &a->prev_log_term))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "leader_commit", &a->leader_commit))
+			return nullptr;
+
+		if (xson_get_string_by_expr(root, "leader_id.ip", ip_buf, sizeof(ip_buf)))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "leader_id.port", &port))
+			return nullptr;
+
+		array_size = xson_get_arraysize_by_expr(root, "entries");
+
+		for(int i = 0; i < array_size; ++i) {
+			w_int_t                  string_size;
+			std::unique_ptr<char[]>  p;
+
+			a->entries.push_back(log_entry());
+
+			sprintf(expr_buf, "entries[%d].term", i);
+
+			if (xson_get_int_by_expr(root, expr_buf, &a->entries.back().term))
+				return nullptr;
+
+			sprintf(expr_buf, "entries[%d].index", i);
+
+			if (xson_get_int_by_expr(root, expr_buf, &a->entries.back().index))
+				return nullptr;
+
+			sprintf(expr_buf, "entries[%d].data", i);
+
+			string_size = xson_get_stringsize_by_expr(root, expr_buf);
+
+			if (string_size < 0)
+				return nullptr;
+
+			p = std::unique_ptr<char[]>(new char[string_size]);
+
+			if (xson_get_string_by_expr(root, expr_buf, p.get(), string_size))
+				return nullptr;
+
+			a->entries.back().data.assign(p.get());
+		}
+
+		return a.release();
 	}
 
 	append_entries_res_t *
 	make_append_entries_res_from_message(message_t & m) {
-		return nullptr;
+		struct xson_context                    ctx;
+		struct xson_element                   *root;
+		std::unique_ptr<append_entries_res_t>  a;
+		w_int_t                                success;
+
+		if (xson_init(&ctx, m.data))
+			return nullptr;
+		
+		if (xson_parse(&ctx, &root) != XSON_RESULT_SUCCESS)
+			return nullptr;
+
+		a = std::unique_ptr<append_entries_res_t>(new append_entries_res_t);
+
+		if (xson_get_int_by_expr(root, "term", &a->term))
+			return nullptr;
+
+		if (xson_get_int_by_expr(root, "success", &success))
+			return nullptr;
+
+		a->success = success;
+
+		return a.release();
 	}
 }

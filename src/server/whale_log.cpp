@@ -11,7 +11,7 @@
 
 namespace whale {
 
-	w_rc_t logger::init(){
+	w_rc_t logger::init() {
 		fd = ::open(log_file.c_str(), ENTRY_LOG_FILE_FLAGS, ENTRY_LOG_FILE_MODE);
 
 		if (fd == -1) {
@@ -22,7 +22,7 @@ namespace whale {
 		return WHALE_GOOD;
 	}
 
-	w_rc_t	logger::write(){
+	w_rc_t	logger::write() {
 
 		return WHALE_GOOD;
 	}

@@ -28,7 +28,6 @@ namespace whale {
 			log_error("failed to ::socket: %s", ::strerror(errno));
 			return -1;
 		}
-			return -1;
 
 		if (::bind(fd, (struct sockaddr*)&addr->addr,
 		           sizeof(struct sockaddr))) {
@@ -44,6 +43,33 @@ namespace whale {
 		return fd;
 	}
 
+	static el_socket_t connect_to_peer(peer_t & peer) {
+		el_socket_t fd;
+
+		fd = ::socket(AF_INET, SOCK_STREAM, 0);
+
+		if (fd == -1) {
+			log_error("failed to ::socket: %s", ::strerror(errno));
+			return WHALE_ERROR;
+		}
+
+		if (::bind(fd, (struct sockaddr*)&peer.addr.addr,
+		           sizeof(struct sockaddr))) {
+			log_error("failed to ::bind on fd[%d]: %s",
+			          fd, ::strerror(errno));
+			return WHALE_ERROR;
+		}
+		
+		if (::connect(fd, (struct sockaddr*)&peer.addr.addr,
+			          sizeof(struct sockaddr))) {
+			log_error("failed to ::connect to fd[%d]: %s",
+			          fd, ::strerror(errno));
+			return WHALE_ERROR;
+		}
+
+		return fd;
+	}
+
 	static void
 	server_listen_callback(el_socket_t fd, short res_flags, void *arg) {
 		whale_server * s = static_cast<whale_server *>(arg);
@@ -52,6 +78,11 @@ namespace whale {
 
 	static void
 	peer_callback(el_socket_t fd, short res_flags, void *arg) {
+
+	}
+
+	static void
+	server_callback(el_socket_t fd, short res_flags, void *arg) {
 
 	}
 
@@ -88,6 +119,10 @@ namespace whale {
 		return e->h_name;
 	}
 
+
+	/*
+	* accept peer connection as peer may restart or restore from partition.
+	*/
 	void whale_server::handle_listen_fd(short flags) {
 		w_addr_t    addr;
 		el_socket_t peer_fd;
@@ -117,6 +152,25 @@ namespace whale {
 			          it->second.addr.name.c_str(), peer_fd, strerror(errno));
 	}
 
+	void
+	whale_server::connect_to_servers() {
+		for(auto & it : this->servers) {
+
+			if(it.second.connected) continue;
+
+			el_socket_t fd;
+
+			fd = connect_to_peer(it.second);
+
+			if (fd >= 0) {
+				struct event * e = &it.second.e;
+
+				it.second.connected = true;
+
+				event_set(e, fd, E_READ, server_callback, &it.second);
+			}
+		}
+	}
 	w_rc_t whale_server::init() {
 		w_rc_t rc;
 
@@ -191,7 +245,7 @@ namespace whale {
 		while (p) {
 			peer_t  peer;
 			char   *port_p;
-			w_int_t port;
+			int     port;
 
 			if (!is_ip(p)) {
 				log_error("invalid peer ip: %s", p);
@@ -205,7 +259,7 @@ namespace whale {
 			*port_p = '\0';
 
 			if (p)
-				::sscanf(port_p + 1, "%ld", &port);
+				::sscanf(port_p + 1, "%d", &port);
 			else
 				port = listen_port;
 
@@ -226,6 +280,8 @@ namespace whale {
 			peer.addr.name = get_peer_hostname(peer.addr);
 
 			this->peers.insert(std::pair<w_addr_t, peer_t>(peer.addr, peer));
+
+			this->servers.insert(std::pair<w_addr_t, peer_t>(peer.addr, peer));
 
 			p = ::strtok(NULL, " ");
 		}
@@ -255,6 +311,7 @@ namespace whale {
 			return WHALE_ERROR;
 		}
 
+		/* start timer event for election*/
 		event_set(&this->elec_timeout_event,
 		          NEXT_TIMEOUT(WHALE_MIN_ELEC_TIMEOUT, WHALE_MAX_ELEC_TIMEOUT),
 		          E_TIMEOUT, elec_timeout_callback, this);
@@ -264,6 +321,8 @@ namespace whale {
 			          " election timeout event: %s", ::strerror(errno));
 			return WHALE_ERROR;
 		}
+
+		connect_to_servers();
 
 		return WHALE_GOOD;
 	}

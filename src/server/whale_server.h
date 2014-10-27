@@ -23,6 +23,7 @@ namespace whale {
 		w_int_t			next_idx;
 		w_int_t			match_idx;
 		whale_server   *server;
+		bool            connected;
 	} peer_t;
 
 	/* stuff need to stay persistent on disk*/
@@ -66,6 +67,7 @@ namespace whale {
 		w_rc_t init();
 
 		void handle_listen_fd(short flags);
+		void connect_to_servers();
 	private:
 		
 

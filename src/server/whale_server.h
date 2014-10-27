@@ -2,6 +2,7 @@
 * Copyright (C) Xinjing Cho
 */
 #include <memory>
+#include <random>
 
 #include <sys/mman.h>
 
@@ -24,14 +25,11 @@ namespace whale {
 		whale_server   *server;
 	} peer_t;
 
-	#define WHALE_PEER_SELF peer_t {{0}, {0}, 0, 0}
-
 	/* stuff need to stay persistent on disk*/
 	typedef struct file_mapped_s{
 		w_int_t 	current_term;	/* current term */
 		peer_t		voted_for;		/* candidate veted for */
 	} file_mapped_t;
-
 
 	#define FOLLOWER	0
 	#define CANDIDATE	1
@@ -40,13 +38,20 @@ namespace whale {
 	#define MAP_FILE_PROT 	PROT_WRITE | PROT_READ
 	#define MAP_FILE_FLAGS	MAP_SHARED
 
-	#define DEFAULT_LISTEN_PORT 29999
-	#define WHALE_BACKLOG       10
+	#define DEFAULT_LISTEN_PORT    29999
+	#define WHALE_BACKLOG          10
+	#define WHALE_MIN_ELEC_TIMEOUT 150
+	#define WHALE_MAX_ELEC_TIMEOUT 300
+	
 	typedef struct {
 		bool operator()(const w_addr_t &a1, const w_addr_t &a2) {
 			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr;
 		}
 	}WADDR_PRED;
+
+	std::random_device rd;
+
+	#define NEXT_TIMEOUT(mi, ma) ((mi) + rd() % ((ma) - (mi) + 1))
 
 	class whale_server {
 	public:
@@ -60,7 +65,9 @@ namespace whale {
 		*/
 		w_rc_t init();
 
+		void handle_listen_fd(short flags);
 	private:
+		
 
 		inline file_mapped_t * get_fmapped() {
 			return static_cast<file_mapped_t *>(map->get_addr());
@@ -70,13 +77,15 @@ namespace whale {
 		std::unique_ptr<config> 		cfg;
 		std::string                     cfg_file;
 		std::map<w_addr_t, peer_t,
-				 WADDR_PRED>            peers;
+				 WADDR_PRED>            peers, servers;
 		w_int_t							state;
 		w_int_t							commit_index;
 		w_int_t							last_applied;
 		struct reactor                  r;
 		struct event                    listen_event;
+		struct event                    elec_timeout_event;
 		w_int_t                         listen_port;
+		el_socket_t                     listen_fd;
 	};
 
 }

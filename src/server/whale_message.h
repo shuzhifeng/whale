@@ -18,14 +18,15 @@ namespace whale {
 	#define MESSAGE_APPEND_ENTRIES		2
 	#define MESSAGE_APPEND_ENTRIES_RES	3
 
-	#define MESSAGE_PAYLOAD_LEN(m) ((m)->len - sizeof(w_int_t))
+	#define MESSAGE_PAYLOAD_LEN(m) ((m)->len - sizeof(int32_t))
+	#define MESSAGE_SIZE(m)        (::ntohl((m)->len))
 	/*
 	* Generic message sent over the network.
 	*/
 	typedef struct message_s {
 		/* the folliwing two fields are in network byte order */
-		w_int_t len;		/* size of the struct */
-		w_int_t	msg_type;	/* message type */
+		int32_t len;		/* size of the struct */
+		int32_t	msg_type;	/* message type */
 		char 	data[];		/* actual payload */
 	} message_t;
 

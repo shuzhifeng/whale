@@ -43,8 +43,8 @@ namespace whale {
 			return entries;
 		}
 
-		w_int_t get_last_log_idx() {
-			return entries.back().index;
+		log_entry_t & get_last_log() {
+			return entries.back();
 		}
 	private:
 		std::string					log_file;

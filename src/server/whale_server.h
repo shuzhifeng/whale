@@ -90,6 +90,7 @@ namespace whale {
 		struct event                    listen_event;
 		struct event                    elec_timeout_event;
 		w_int_t                         listen_port;
+		w_addr_t                        self;
 		el_socket_t                     listen_fd;
 		w_int_t                         vote_count;
 		

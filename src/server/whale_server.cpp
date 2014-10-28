@@ -19,6 +19,7 @@
 
 namespace whale {
 	typedef std::map<w_addr_t, peer_t>::iterator peer_it;
+	typedef std::unique_ptr<message_t>      m_uptr;
 
 	static w_rc_t set_fd_nonblocking(el_socket_t fd) {
 		int flags = 0;
@@ -212,6 +213,7 @@ namespace whale {
 	}
 
 	void whale_server::send_request_votes() {
+
 		this->state = CANDIDATE;
 		this->get_fmapped()->current_term++;
 		this->map->sync();
@@ -221,7 +223,25 @@ namespace whale {
 		request_vote_t rv;
 
 		rv.term = this->get_fmapped()->current_term;
+		rv.candidate_id = this->self;
+		rv.last_log_idx = this->log->get_last_log().index;
+		rv.last_log_term = this->log->get_last_log().term;
 
+		m_uptr p = m_uptr(make_message_from_request_vote(rv));
+		w_int_t size = MESSAGE_SIZE(p);
+
+		for (auto it : this->servers) {
+			if (!it.second.connected)continue;
+			w_int_t nbytes = 0, n = 0;
+			again:
+			while ((nbytes = write(it.second.e.fd,
+			                      p.get() + n,
+			                      size - n)) > 0) {
+				n += nbytes;
+			}
+			if (nbytes < 0 && errno == EINTR)
+				goto again;
+		}
 	}
 	/*
 	* accept peer connection as peer may restart or restore from partition.
@@ -338,6 +358,20 @@ namespace whale {
 			return rc;
 		/* end of log_file */
 
+		/* listen_ip */
+		std::string * s_listen_ip = cfg->get("listen_ip");
+
+		if (s_listen_ip == nullptr) {
+			log_error("listen_ip is required");
+			return WHALE_CONF_ERROR;
+		} else if(!is_ip(*s_listen_ip)) {
+			log_error("listen_ip is invalid");
+			return WHALE_CONF_ERROR;
+		}
+
+		inet_aton(s_listen_ip->c_str(), &this->self.addr.sin_addr);
+		/* end of listen_ip */
+
 		/* listen_port */
 		std::string * s_listen_port = cfg->get("listen_port");
 
@@ -351,6 +385,8 @@ namespace whale {
 			return WHALE_CONF_ERROR;
 		}
 		/* end of listen_port */
+
+		this->self.name = get_peer_hostname(this->self);
 
 		/* peers */
 		std::string * peer_ips = cfg->get("peers");

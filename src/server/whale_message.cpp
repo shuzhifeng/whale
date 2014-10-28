@@ -41,8 +41,8 @@ namespace whale {
 		return std::move(string_format("\"%s\":{\"ip\":\"%s\","
 											"\"port\":%u}",
 											key_name.c_str(),
-											inet_ntoa(addr.addr.sin_addr),
-											addr.addr.sin_port));
+											::inet_ntoa(addr.addr.sin_addr),
+											::ntohs(addr.addr.sin_port)));
 	}
 
 	static std::string log_entry_to_json(const log_entry & entry) {
@@ -80,8 +80,8 @@ namespace whale {
 							)));
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
-		m->msg_type = htonl(MESSAGE_REQUEST_VOTE);
-		m->len = htonl(sizeof(message_t) + json.size());
+		m->msg_type = ::htonl(MESSAGE_REQUEST_VOTE);
+		m->len = ::htonl(sizeof(message_t) + json.size());
 		strcpy(m->data, json.c_str());
 
 		return m;
@@ -96,8 +96,8 @@ namespace whale {
 							)));
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
-		m->msg_type = htonl(MESSAGE_REQUEST_VOTE_RES);
-		m->len = htonl(sizeof(message_t) + json.size());
+		m->msg_type = ::htonl(MESSAGE_REQUEST_VOTE_RES);
+		m->len = ::htonl(sizeof(message_t) + json.size());
 		strcpy(m->data, json.c_str());
 
 		return m;
@@ -119,8 +119,8 @@ namespace whale {
 							)));
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
-		m->msg_type = htonl(MESSAGE_APPEND_ENTRIES);
-		m->len = htonl(sizeof(message_t) + json.size());
+		m->msg_type = ::htonl(MESSAGE_APPEND_ENTRIES);
+		m->len = ::htonl(sizeof(message_t) + json.size());
 		strcpy(m->data, json.c_str());
 
 		return m;
@@ -135,8 +135,8 @@ namespace whale {
 							)));
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
-		m->msg_type = htonl(MESSAGE_APPEND_ENTRIES_RES);
-		m->len = htonl(sizeof(message_t) + json.size());
+		m->msg_type = ::htonl(MESSAGE_APPEND_ENTRIES_RES);
+		m->len = ::htonl(sizeof(message_t) + json.size());
 		strcpy(m->data, json.c_str());
 
 		return m;
@@ -149,7 +149,7 @@ namespace whale {
 		struct xson_element             *root;
 		std::unique_ptr<request_vote_t>  r;
 		char                             ip_buf[50] = {0};
-		int                              port;
+		w_int_t                          port;
 		
 		if (xson_init(&ctx, m.data))
 			return nullptr;
@@ -159,23 +159,23 @@ namespace whale {
 
 		r = std::unique_ptr<request_vote_t>(new request_vote_t);
 
-		if (xson_get_int_by_expr(root, "term", &r->term))
+		if (xson_get_intptr_by_expr(root, "term", &r->term))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "last_log_idx", &r->last_log_idx))
+		if (xson_get_intptr_by_expr(root, "last_log_idx", &r->last_log_idx))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "last_log_term", &r->last_log_term))
+		if (xson_get_intptr_by_expr(root, "last_log_term", &r->last_log_term))
 			return nullptr;
 
 		if (xson_get_string_by_expr(root, "candidate_id.ip", ip_buf, sizeof(ip_buf)))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "candidate_id.port", &port))
+		if (xson_get_intptr_by_expr(root, "candidate_id.port", &port))
 			return nullptr;
 
 		inet_aton(ip_buf, &r->candidate_id.addr.sin_addr);
-		r->candidate_id.addr.sin_port = port;
+		r->candidate_id.addr.sin_port = ::htons(port);
 
 		return r.release();
 	}
@@ -185,7 +185,7 @@ namespace whale {
 		struct xson_context                  ctx;
 		struct xson_element                 *root;
 		std::unique_ptr<request_vote_res_t>  r;
-		int                                  vote_granted;
+		w_int_t                              vote_granted;
 
 		if (xson_init(&ctx, m.data))
 			return nullptr;
@@ -195,10 +195,10 @@ namespace whale {
 
 		r = std::unique_ptr<request_vote_res_t>(new request_vote_res_t);
 
-		if (xson_get_int_by_expr(root, "term", &r->term))
+		if (xson_get_intptr_by_expr(root, "term", &r->term))
 			return nullptr;
 		
-		if (xson_get_int_by_expr(root, "vote_granted", &vote_granted))
+		if (xson_get_intptr_by_expr(root, "vote_granted", &vote_granted))
 			return nullptr;
 
 		r->vote_granted = vote_granted;
@@ -213,8 +213,8 @@ namespace whale {
 		std::unique_ptr<append_entries_t>  a;
 		char                               ip_buf[50] = {0};
 		char                               expr_buf[50] = {0};
-		int                                port;
-		int                                array_size;
+		w_int_t                            port;
+		w_int_t                            array_size;
 
 		if (xson_init(&ctx, m.data))
 			return nullptr;
@@ -222,23 +222,26 @@ namespace whale {
 		if (xson_parse(&ctx, &root) != XSON_RESULT_SUCCESS)
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "term", &a->term))
+		if (xson_get_intptr_by_expr(root, "term", &a->term))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "prev_log_idx", &a->prev_log_idx))
+		if (xson_get_intptr_by_expr(root, "prev_log_idx", &a->prev_log_idx))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "prev_log_term", &a->prev_log_term))
+		if (xson_get_intptr_by_expr(root, "prev_log_term", &a->prev_log_term))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "leader_commit", &a->leader_commit))
+		if (xson_get_intptr_by_expr(root, "leader_commit", &a->leader_commit))
 			return nullptr;
 
 		if (xson_get_string_by_expr(root, "leader_id.ip", ip_buf, sizeof(ip_buf)))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "leader_id.port", &port))
+		if (xson_get_intptr_by_expr(root, "leader_id.port", &port))
 			return nullptr;
+
+		inet_aton(ip_buf, &a->leader_id.addr.sin_addr);
+		a->leader_id.addr.sin_port = ::htons(port);
 
 		array_size = xson_get_arraysize_by_expr(root, "entries");
 
@@ -250,12 +253,12 @@ namespace whale {
 
 			sprintf(expr_buf, "entries[%d].term", i);
 
-			if (xson_get_int_by_expr(root, expr_buf, &a->entries.back().term))
+			if (xson_get_intptr_by_expr(root, expr_buf, &a->entries.back().term))
 				return nullptr;
 
 			sprintf(expr_buf, "entries[%d].index", i);
 
-			if (xson_get_int_by_expr(root, expr_buf, &a->entries.back().index))
+			if (xson_get_intptr_by_expr(root, expr_buf, &a->entries.back().index))
 				return nullptr;
 
 			sprintf(expr_buf, "entries[%d].data", i);
@@ -281,7 +284,7 @@ namespace whale {
 		struct xson_context                    ctx;
 		struct xson_element                   *root;
 		std::unique_ptr<append_entries_res_t>  a;
-		int                                    success;
+		w_int_t                                success;
 
 		if (xson_init(&ctx, m.data))
 			return nullptr;
@@ -291,10 +294,10 @@ namespace whale {
 
 		a = std::unique_ptr<append_entries_res_t>(new append_entries_res_t);
 
-		if (xson_get_int_by_expr(root, "term", &a->term))
+		if (xson_get_intptr_by_expr(root, "term", &a->term))
 			return nullptr;
 
-		if (xson_get_int_by_expr(root, "success", &success))
+		if (xson_get_intptr_by_expr(root, "success", &success))
 			return nullptr;
 
 		a->success = success;

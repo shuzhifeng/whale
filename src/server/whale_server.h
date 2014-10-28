@@ -19,7 +19,7 @@ namespace whale {
 
 	typedef struct peer_s{
 		w_addr_t 		addr;
-		struct event 	e;
+		struct event 	e, timeout_e;
 		w_int_t			next_idx;
 		w_int_t			match_idx;
 		whale_server   *server;
@@ -39,11 +39,12 @@ namespace whale {
 	#define MAP_FILE_PROT 	PROT_WRITE | PROT_READ
 	#define MAP_FILE_FLAGS	MAP_SHARED
 
-	#define DEFAULT_LISTEN_PORT    29999
-	#define WHALE_BACKLOG          10
-	#define WHALE_MIN_ELEC_TIMEOUT 150
-	#define WHALE_MAX_ELEC_TIMEOUT 300
-	
+	#define DEFAULT_LISTEN_PORT     29999
+	#define WHALE_BACKLOG           10
+	#define WHALE_MIN_ELEC_TIMEOUT  150
+	#define WHALE_MAX_ELEC_TIMEOUT  300
+	#define WHALE_RECONNECT_TIMEOUT 1000
+
 	typedef struct {
 		bool operator()(const w_addr_t &a1, const w_addr_t &a2) {
 			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr;
@@ -68,8 +69,10 @@ namespace whale {
 
 		void handle_listen_fd(short flags);
 		void connect_to_servers();
+		void send_request_votes();
+		struct reactor * get_reactor() {return &r;};
 	private:
-		
+		void reset_elec_timeout_event();
 
 		inline file_mapped_t * get_fmapped() {
 			return static_cast<file_mapped_t *>(map->get_addr());
@@ -88,6 +91,8 @@ namespace whale {
 		struct event                    elec_timeout_event;
 		w_int_t                         listen_port;
 		el_socket_t                     listen_fd;
+		w_int_t                         vote_count;
+		
 	};
 
 }

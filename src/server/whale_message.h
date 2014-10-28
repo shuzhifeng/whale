@@ -43,7 +43,7 @@ namespace whale {
 	*/
 	typedef struct request_vote_s {
 		w_int_t		term;			/* cadidate's term */
-		w_addr_t	candidate_id;	/* candidate requesting vote, in host byte order*/
+		w_addr_t	candidate_id;	/* candidate requesting vote */
 		w_int_t		last_log_idx;	/* index of candidate's last log entry */
 		w_int_t		last_log_term;	/* term of candidate's last log entry */
 	} request_vote_t;

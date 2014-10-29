@@ -4,7 +4,7 @@
 
 #ifndef MESSAGE_H_
 #define MESSAGE_H_
-
+#include <memory>
 #include <vector>
 
 #include <define.h>
@@ -29,6 +29,10 @@ namespace whale {
 		int32_t	msg_type;	/* message type */
 		char 	data[];		/* actual payload */
 	} message_t;
+
+
+	typedef std::shared_ptr<message_t> msg_sptr;
+	typedef std::unique_ptr<message_t> msg_uptr;
 
 	/*
 	* JSON format: 

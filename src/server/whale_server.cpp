@@ -227,20 +227,12 @@ namespace whale {
 		rv.last_log_idx = this->log->get_last_log().index;
 		rv.last_log_term = this->log->get_last_log().term;
 
-		m_uptr p = m_uptr(make_message_from_request_vote(rv));
-		w_int_t size = MESSAGE_SIZE(p);
+		msg_sptr p = msg_sptr(make_message_from_request_vote(rv));
 
-		for (auto it : this->servers) {
-			if (!it.second.connected)continue;
-			w_int_t nbytes = 0, n = 0;
-			again:
-			while ((nbytes = write(it.second.e.fd,
-			                      p.get() + n,
-			                      size - n)) > 0) {
-				n += nbytes;
-			}
-			if (nbytes < 0 && errno == EINTR)
-				goto again;
+		for (auto & it : this->servers) {
+			if (!it.second.connected) continue;
+			it.second.write_queue.push({0, p});
+
 		}
 	}
 	/*
@@ -249,7 +241,7 @@ namespace whale {
 	void whale_server::handle_listen_fd(short flags) {
 		w_addr_t    addr;
 		el_socket_t peer_fd;
-		socklen_t   sock_len;
+		socklen_t   sock_len = sizeof(struct sockaddr);
 		peer_it     it;
 
 		peer_fd = ::accept(listen_fd, (struct sockaddr*)&addr.addr, &sock_len);
@@ -400,7 +392,6 @@ namespace whale {
 		p = ::strtok(const_cast<char*>(peer_ips->data()), " ");
 
 		while (p) {
-			peer_t  peer;
 			char   *port_p;
 			int     port;
 
@@ -409,7 +400,7 @@ namespace whale {
 				return WHALE_CONF_ERROR;
 			}
 
-			::memset(&peer, 0, sizeof(peer));
+			peer_t peer = INIT_PEER;
 
 			port_p = strchr(p, ':');
 

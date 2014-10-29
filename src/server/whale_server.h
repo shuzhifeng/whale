@@ -3,6 +3,7 @@
 */
 #include <memory>
 #include <random>
+#include <queue>
 
 #include <sys/mman.h>
 
@@ -13,18 +14,45 @@
 #include <file_mmap.h>
 #include <whale_log.h>
 #include <whale_config.h>
+#include <whale_message.h>
 
 namespace whale {
 	class whale_server;
 
+	typedef struct message_queue_elt_s {
+		/* position at which we should resume processing(read or write) */
+		int32_t    pin;
+		msg_sptr   msg;
+	}msg_q_elt;
+
+	typedef std::queue<msg_q_elt> msg_queue;
+
 	typedef struct peer_s{
 		w_addr_t 		addr;
-		struct event 	e, timeout_e;
+		struct event 	e;
+		/* timeout event to reconnect to peer */
+		struct event    timeout_e;
 		w_int_t			next_idx;
 		w_int_t			match_idx;
+		/* back pointer to server */
 		whale_server   *server;
+		/* if the peer is connected */
 		bool            connected;
+		/* messages read from peer */
+		msg_queue       read_queue;
+		/* messages to be written to peer */
+		msg_queue       write_queue;
 	} peer_t;
+
+	#define INIT_PEER    {  \
+		.addr =  {0},       \
+		.e = {0},           \
+		.timeout_e = {0},   \
+		.next_idx = 0,      \
+		.match_idx = 0,     \
+		.server = 0,        \
+		.connected = 0     \
+	}
 
 	/* stuff need to stay persistent on disk*/
 	typedef struct file_mapped_s{

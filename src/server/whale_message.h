@@ -25,9 +25,9 @@ namespace whale {
 	*/
 	typedef struct message_s {
 		/* the folliwing two fields are in network byte order */
-		int32_t len;		/* size of the struct */
-		int32_t	msg_type;	/* message type */
-		char 	data[];		/* actual payload */
+		uint32_t len;           /* size of the struct */
+		uint32_t msg_type;      /* message type */
+		char 	 data[];        /* actual payload */
 	} message_t;
 
 
@@ -53,6 +53,9 @@ namespace whale {
 		w_int_t		last_log_term;	/* term of candidate's last log entry */
 	} request_vote_t;
 
+	typedef std::shared_ptr<request_vote_t> rv_sptr;
+	typedef std::unique_ptr<request_vote_t> rv_uptr;
+
 	/*
 	* JSON format: 
 	* {
@@ -64,8 +67,9 @@ namespace whale {
 		w_int_t		term;			/* current term on the server, for candidate to update itself */
 		bool		vote_granted;	/* true if candidate got a vote */
 	} request_vote_res_t;
-
-
+	
+	typedef std::shared_ptr<request_vote_res_t> rvs_sptr;
+	typedef std::unique_ptr<request_vote_res_t> rvs_uptr;
 	/*
 	* JSON format: 
 	* {
@@ -100,6 +104,9 @@ namespace whale {
 		w_int_t					leader_commit;	/* leader's commit_idx */
 	} append_entries_t;
 
+	typedef std::shared_ptr<append_entries_t> ae_sptr;
+	typedef std::unique_ptr<append_entries_t> ae_uptr;
+
 	/*
 	* JSON format: 
 	* {
@@ -112,14 +119,17 @@ namespace whale {
 		bool		success;	/* true if follower contained entry matching prev_log_idx and prev_log_term*/
 	} append_entries_res_t;
 
-	message_t * make_message_from_request_vote(request_vote_t & r);
-	message_t * make_message_from_request_vote_res(request_vote_res_t & r);
-	message_t * make_message_from_append_entries(append_entries_t & r);
-	message_t * make_message_from_append_entries_res(append_entries_res_t & r);
+	typedef std::shared_ptr<append_entries_res_t> aes_sptr;
+	typedef std::unique_ptr<append_entries_res_t> aes_uptr;
 
-	request_vote_t 		* make_request_vote_from_message(message_t & m);
-	request_vote_res_t 	* make_request_vote_res_from_message(message_t & m);
-	append_entries_t 	* make_append_entries_from_message(message_t & m);
-	append_entries_res_t * make_append_entries_res_from_message(message_t & m);
+	message_t * make_message_from_request_vote(const request_vote_t & r);
+	message_t * make_message_from_request_vote_res(const request_vote_res_t & r);
+	message_t * make_message_from_append_entries(const append_entries_t & r);
+	message_t * make_message_from_append_entries_res(const append_entries_res_t & r);
+
+	request_vote_t 		* make_request_vote_from_message(const message_t & m);
+	request_vote_res_t 	* make_request_vote_res_from_message(const message_t & m);
+	append_entries_t 	* make_append_entries_from_message(const message_t & m);
+	append_entries_res_t * make_append_entries_res_from_message(const message_t & m);
 }
 #endif

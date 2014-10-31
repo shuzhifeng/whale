@@ -90,14 +90,15 @@ namespace whale {
 			if (errno != EINPROGRESS) {
 				log_error("failed to ::connect to fd[%d]: %s",
 			          fd, ::strerror(errno));
-				goto fail;
 			}
 			goto fail;
 		}
 		peer.connected = true;
 		return fd;
 	fail:
-		close(fd);
+		if (close(fd) == -1 && errno == EINTR);
+			goto fail;
+
 		return WHALE_ERROR;
 	}
 
@@ -111,7 +112,7 @@ namespace whale {
 	}
 
 	/*
-	* gets called when leader or candidate sends a message.
+	* gets called when candidate or leader sends data as a follower.
 	*/
 	static void
 	peer_callback(el_socket_t fd, short res_flags, void *arg) {
@@ -119,11 +120,20 @@ namespace whale {
 	}
 
 	/*
-	* gets called when candidate or follower reply a message.
+	* handles read and write messages from/to a peer as a candidate or leader.
 	*/
 	static void
 	server_callback(el_socket_t fd, short res_flags, void *arg) {
+		peer_t       *peer = static_cast<peer_t*>(arg);
+		whale_server *s = peer->server;
 
+		if (res_flags & E_READ) {
+			s->handle_read_from_peer(peer);
+		}
+
+		if (res_flags & E_WRITE) {
+			s->handle_write_to_peer(peer);
+		}
 	}
 
 	/*
@@ -155,12 +165,14 @@ namespace whale {
 
 			event_set(e, fd, E_READ, server_callback, peer);
 
-			if (reactor_remove_event(peer->server->get_reactor(), &peer->timeout_e) == -1)
+			if (reactor_remove_event(peer->server->get_reactor(),
+			                         &peer->timeout_e) == -1)
 			    log_error("failed to reactor_remove_event "
 			              " reconnecting timer event: %s", ::strerror(errno));
 
 			/* remove @e from the reactor if @e was previously in the reactor.*/
-			if (!event_in_reactor(e) && reactor_remove_event(peer->server->get_reactor(), e) == -1) {
+			if (!event_in_reactor(e) &&
+			    reactor_remove_event(peer->server->get_reactor(), e) == -1) {
 				log_error("failed to reactor_remove_event "
 			              " stale event: %s", ::strerror(errno));
 			}
@@ -201,6 +213,265 @@ namespace whale {
 		return e->h_name;
 	}
 
+
+	/*
+	* compare candidate's log to receiver's.
+	* Return: true if candidate's log is at least as up-to-date as receiver's, false otherwise.
+	* @last_log_idx: candidate's last log index.
+	* @last_log_term: candidate's last log term.
+	*/
+	bool whale_server::compare_log_to_local(w_int_t last_log_idx, w_int_t last_log_term) {
+		return last_log_term > this->log->get_last_log().term ||
+			   (last_log_term == this->log->get_last_log().term &&
+			   	last_log_idx >= this->log->get_last_log().index);
+	}
+
+	void whale_server::process_request_vote(peer_t * p, msg_sptr msg) {
+		static char dummy[50];
+
+		rv_uptr rv = rv_uptr(make_request_vote_from_message(*msg));
+		bool    granted = false;
+
+		/*
+		* rejects if :
+		*     1. candidate's term < currentTerm
+		*     2. candidate's log is not at least as up-to-date as receiver's.
+		*/
+		if (rv->term < get_fmapped()->current_term) {
+			granted = false;
+			goto send_message;
+		}
+
+		/*
+		* grants if :
+		*     1. votedFor is null(first boot).
+		*     2. candidate's log is at least as up-to-date as receiver's.
+		*/
+		if (!::memcmp(&get_fmapped()->voted_for, dummy, sizeof(struct sockaddr_in))
+			|| compare_log_to_local(rv->last_log_idx, rv->last_log_term)) {
+
+			::memcpy(&get_fmapped()->voted_for, &p->addr.addr,
+			         sizeof(struct sockaddr_in));
+			get_fmapped()->current_term = rv->term;
+			this->map->sync();
+			granted = true;
+		}
+
+	send_message:
+
+		msg_q_elt elt{0, 0};
+		elt.msg = msg_sptr(make_message_from_request_vote_res({
+				                     get_fmapped()->current_term, granted}));
+
+		p->write_queue.push(elt);
+
+		handle_write_to_peer(p);
+	}
+
+	void whale_server::process_request_vote_res(peer_t * p, msg_sptr msg) {
+
+	}
+
+	void whale_server::process_append_entries(peer_t * p, msg_sptr msg) {
+
+	}
+
+	void whale_server::process_append_entries_res(peer_t * p, msg_sptr msg) {
+
+	}
+
+	/*
+	* handles fully read messages from peer's read_queue
+	*/
+	void whale_server::process_messages(peer_t * p) {
+		msg_queue & q = p->read_queue;
+		while (!q.empty()) {
+			msg_q_elt & elt = q.front();
+
+			/* process complete message only */
+			if (elt.pin < ::htonl(elt.msg->len))
+				break;
+
+			switch (::htonl(elt.msg->msg_type)) {
+			case MESSAGE_REQUEST_VOTE:
+				process_request_vote(p, elt.msg);
+				break;
+			case MESSAGE_REQUEST_VOTE_RES:
+				process_request_vote_res(p, elt.msg);
+				break;
+			case MESSAGE_APPEND_ENTRIES:
+				process_append_entries(p, elt.msg);
+				break;
+			case MESSAGE_APPEND_ENTRIES_RES:
+				process_append_entries_res(p, elt.msg);
+				break;
+			}
+
+			q.pop();
+		}
+	}
+
+	/* 
+	* read as many as messages from peer until ::read() returns EAGAIN,
+	* and start processing messages.
+	*/
+	void whale_server::handle_read_from_peer(peer_t * p) {
+		el_socket_t fd = p->e.fd;
+		int32_t     nread = 0;
+		uint32_t    size;
+		msg_q_elt  *elt;
+
+		/* 
+		* special case for empty queue
+		*/
+		if (p->read_queue.empty()) {
+			p->read_queue.push({0, 0, msg_sptr()});
+		}
+
+	again:
+		elt = &p->read_queue.back();
+
+		/* 
+		* read the length of the incoming message, 
+		* and construct a message with size of @elt->tmp_len.
+		*/
+		if (elt->msg.use_count() == 0) {
+
+			while (elt->pin < sizeof(uint32_t)) {
+				nread = ::read(fd, ((char *)&elt->tmp_len) + elt->pin,
+				               sizeof(uint32_t));
+
+				if (nread <= 0) {
+					if (nread == 0) { /* peer closed connection */
+						peer_cleanup(p);
+						return;
+					} else if (errno == EINTR) {/* retry */
+						continue;
+					} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						goto process_messages_;
+					}
+					/* error occured */
+					log_error("error occured during ::read() from fd[%d]: %s",
+						      fd, ::strerror(errno));
+					::abort();
+				}
+				elt->pin += nread;
+			}
+			/* got the length for @elt->msg */
+
+			elt->msg = msg_sptr(reinterpret_cast<message_t *>(
+				                new char[::htonl(elt->tmp_len)]));
+
+			if (elt->msg.use_count() == 0) {
+				/* memory shortage, retry later*/
+				log_error("failed to allocate %d bytes for message",
+						  ::htonl(elt->tmp_len));
+				goto process_messages_;
+			}
+
+			elt->pin = 0;
+		}
+
+		size = MESSAGE_SIZE(elt->msg);
+
+		while (elt->pin < size) {
+			nread = ::read(fd, elt->msg.get() + elt->pin, size - elt->pin);
+
+			if (nread <= 0) {
+				if (nread == 0) { /* peer closed connection */
+					peer_cleanup(p);
+					return;
+				} else if (errno == EINTR) { /* retry */
+					continue;
+				} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					goto process_messages_;
+				}
+				/* error occured */
+				log_error("error occured during ::read() from fd[%d]: %s",
+					      fd, ::strerror(errno));
+				::abort();
+			}
+			elt->pin += nread;
+		}
+
+		/* successfully read a entire message, create a new one for the next*/
+		p->read_queue.push({0, 0, msg_sptr()});
+
+		goto again;
+
+	process_messages_:
+		process_messages(p);
+	}
+	
+	inline void 
+	whale_server::remove_event_if_in_reactor(struct event * e) {
+		if (event_in_reactor(e))
+			reactor_remove_event(&this->r, e);
+	}
+
+	void whale_server::reset_reconnect_timer(peer_t * p) {
+		/* 
+		*  connect is in progress or peer is not online,
+		*  setup a timer to reconnect after a period of time.
+		*/
+		struct event * timeout_e = &p->timeout_e;
+
+		event_set(timeout_e, WHALE_RECONNECT_TIMEOUT, E_TIMEOUT,
+		          peer_reconnect_callback, p);
+
+		if (reactor_add_event(&this->r, timeout_e) == -1)
+		    log_error("failed to reactor_add_event for"
+		              " reconnecting timeer event: %s", ::strerror(errno));
+	}
+
+	void whale_server::peer_cleanup(peer_t * p) {
+		p->connected = false;
+		msg_queue().swap(p->read_queue);
+		msg_queue().swap(p->write_queue);
+		remove_event_if_in_reactor(&p->e);
+		reset_reconnect_timer(p);
+	}
+
+	/*
+	* write as many as messages to peer until ::write() returns EAGAIN.
+	*/
+	void whale_server::handle_write_to_peer(peer_t * p) {
+		el_socket_t fd = p->e.fd;
+
+		while (!p->write_queue.empty()) {
+			msg_q_elt & elt = p->write_queue.front();
+			uint32_t    size = MESSAGE_SIZE(elt.msg);
+			int32_t     nwrite = 0;
+
+			if (size == elt.pin) {
+				p->write_queue.pop();
+				continue;
+			}
+
+			while (elt.pin < size) {
+				nwrite = ::write(fd, elt.msg.get() + elt.pin, size - elt.pin);
+
+				if(nwrite == -1) {
+					/* socket buffer might not have enough available space */
+					if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						break;
+					} else if (errno == EINTR) { /* retry */
+						continue;
+					} else if (errno == EPIPE) { /* peer closed connection */
+						peer_cleanup(p);
+						return;
+					}
+					
+					/* error occured */
+					log_error("error occured during ::write() to fd[%d]: %s",
+						      fd, ::strerror(errno));
+					::abort();
+				}
+
+				elt.pin += nwrite;
+			}
+		}
+	}
 	void whale_server::reset_elec_timeout_event() {
 		/* start timer event for election*/
 		event_set(&this->elec_timeout_event,
@@ -213,7 +484,6 @@ namespace whale {
 	}
 
 	void whale_server::send_request_votes() {
-
 		this->state = CANDIDATE;
 		this->get_fmapped()->current_term++;
 		this->map->sync();
@@ -231,10 +501,10 @@ namespace whale {
 
 		for (auto & it : this->servers) {
 			if (!it.second.connected) continue;
-			it.second.write_queue.push({0, p});
-
+			it.second.write_queue.push({0, 0, p});
 		}
 	}
+
 	/*
 	* accept peer connection as peer may restart or restore from partition.
 	*/
@@ -256,15 +526,17 @@ namespace whale {
 
 		if (it == std::end(this->peers)) {
 			log_error("a peer not in the cfg file trying to connect, rejecting.");
-			close(peer_fd);
+			again:
+			if (close(peer_fd) == -1 && errno == EINTR);
+				goto again;
+
 			return;
 		}
 
 		/* update hostname */
 		it->second.addr.name = get_peer_hostname(addr);
 
-		if (event_in_reactor(&it->second.e))
-			reactor_remove_event(&this->r, &it->second.e);
+		remove_event_if_in_reactor(&it->second.e);
 
 		event_set(&it->second.e, peer_fd, E_READ, peer_callback, &it->second);
 
@@ -286,20 +558,13 @@ namespace whale {
 			if (fd >= 0) {
 				struct event * e = &it.second.e;
 
-				event_set(e, fd, E_READ, server_callback, &it.second);
-			} else {
-				/* 
-				*  connect is in progress or peer is not online,
-				*  setup a timer to reconnect after a period of time.
-				*/
-				struct event * timeout_e = &it.second.timeout_e;
+				event_set(e, fd, E_READ | E_WRITE, server_callback, &it.second);
 
-				event_set(timeout_e, WHALE_RECONNECT_TIMEOUT, E_TIMEOUT,
-				          peer_reconnect_callback, &it.second);
-
-				if (reactor_add_event(&this->r, timeout_e) == -1)
+				if (reactor_add_event(&this->r, e) == -1)
 				    log_error("failed to reactor_add_event for"
-				              " reconnecting timeer event: %s", ::strerror(errno));
+				              " peer event: %s", ::strerror(errno));
+			} else {
+				reset_reconnect_timer(&it.second);
 			}
 		}
 	}

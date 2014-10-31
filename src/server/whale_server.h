@@ -21,8 +21,10 @@ namespace whale {
 
 	typedef struct message_queue_elt_s {
 		/* position at which we should resume processing(read or write) */
-		int32_t    pin;
-		msg_sptr   msg;
+		uint32_t    pin;
+		/* temporary length for @msg */
+		uint32_t    tmp_len;
+		msg_sptr    msg;
 	}msg_q_elt;
 
 	typedef std::queue<msg_q_elt> msg_queue;
@@ -45,19 +47,19 @@ namespace whale {
 	} peer_t;
 
 	#define INIT_PEER    {  \
-		.addr =  {0},       \
+		.addr =  {{0}, ""}, \
 		.e = {0},           \
 		.timeout_e = {0},   \
 		.next_idx = 0,      \
 		.match_idx = 0,     \
 		.server = 0,        \
-		.connected = 0     \
+		.connected = 0      \
 	}
 
 	/* stuff need to stay persistent on disk*/
 	typedef struct file_mapped_s{
-		w_int_t 	current_term;	/* current term */
-		peer_t		voted_for;		/* candidate veted for */
+		w_int_t 	       current_term;	/* current term */
+		struct sockaddr_in voted_for;		/* candidate veted for */
 	} file_mapped_t;
 
 	#define FOLLOWER	0
@@ -96,12 +98,22 @@ namespace whale {
 		w_rc_t init();
 
 		void handle_listen_fd(short flags);
+		void handle_read_from_peer(peer_t * p);
+		void handle_write_to_peer(peer_t * p);
 		void connect_to_servers();
 		void send_request_votes();
+		void process_messages(peer_t * p);
+		void process_request_vote(peer_t * p, msg_sptr msg);
+		void process_request_vote_res(peer_t * p, msg_sptr msg);
+		void process_append_entries(peer_t * p, msg_sptr msg);
+		void process_append_entries_res(peer_t * p, msg_sptr msg);
 		struct reactor * get_reactor() {return &r;};
 	private:
 		void reset_elec_timeout_event();
-
+		void reset_reconnect_timer(peer_t * p);
+		void remove_event_if_in_reactor(struct event * e);
+		void peer_cleanup(peer_t * p);
+		bool compare_log_to_local(w_int_t last_log_idx, w_int_t last_log_term);
 		inline file_mapped_t * get_fmapped() {
 			return static_cast<file_mapped_t *>(map->get_addr());
 		}

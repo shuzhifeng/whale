@@ -144,7 +144,7 @@ namespace whale {
 
 
 	request_vote_t *
-	make_request_vote_from_message(message_t & m) {
+	make_request_vote_from_message(const message_t & m) {
 		struct xson_context              ctx;
 		struct xson_element             *root;
 		std::unique_ptr<request_vote_t>  r;
@@ -181,7 +181,7 @@ namespace whale {
 	}
 
 	request_vote_res_t *
-	make_request_vote_res_from_message(message_t & m) {
+	make_request_vote_res_from_message(const message_t & m) {
 		struct xson_context                  ctx;
 		struct xson_element                 *root;
 		std::unique_ptr<request_vote_res_t>  r;
@@ -207,7 +207,7 @@ namespace whale {
 	}
 
 	append_entries_t *
-	make_append_entries_from_message(message_t & m) {
+	make_append_entries_from_message(const message_t & m) {
 		struct xson_context                ctx;
 		struct xson_element               *root;
 		std::unique_ptr<append_entries_t>  a;
@@ -280,7 +280,7 @@ namespace whale {
 	}
 
 	append_entries_res_t *
-	make_append_entries_res_from_message(message_t & m) {
+	make_append_entries_res_from_message(const message_t & m) {
 		struct xson_context                    ctx;
 		struct xson_element                   *root;
 		std::unique_ptr<append_entries_res_t>  a;

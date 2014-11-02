@@ -4,6 +4,7 @@
 #include <memory>
 #include <random>
 #include <queue>
+#include <cstdlib>
 
 #include <sys/mman.h>
 
@@ -29,6 +30,23 @@ namespace whale {
 
 	typedef std::queue<msg_q_elt> msg_queue;
 
+	typedef struct reply_queue_elt_s {
+		/* reuqest message type */
+		w_int_t type;
+		/* holds that request sent to peer */
+		void * data;
+		~reply_queue_elt_s() {
+			if (type == MESSAGE_REQUEST_VOTE) 
+				delete static_cast<request_vote_t *>(data);
+			else if(type == MESSAGE_APPEND_ENTRIES)
+				delete static_cast<append_entries_t *>(data);
+
+			::abort();
+		}
+	}reply_queue_elt_s;
+
+	typedef std::queue<reply_queue_elt_s> wait_queue;
+
 	typedef struct peer_s{
 		w_addr_t 		addr;
 		struct event 	e;
@@ -44,6 +62,11 @@ namespace whale {
 		msg_queue       read_queue;
 		/* messages to be written to peer */
 		msg_queue       write_queue;
+		/* 
+		* request messages that are wating for replies
+		* in the order of being sent out.
+		*/
+		wait_queue      request_queue;
 	} peer_t;
 
 	#define INIT_PEER    {  \
@@ -74,6 +97,7 @@ namespace whale {
 	#define WHALE_MIN_ELEC_TIMEOUT  150
 	#define WHALE_MAX_ELEC_TIMEOUT  300
 	#define WHALE_RECONNECT_TIMEOUT 1000
+	#define WHLAE_HEARTBEAT_TIMEOUT 50
 
 	typedef struct {
 		bool operator()(const w_addr_t &a1, const w_addr_t &a2) {
@@ -97,20 +121,25 @@ namespace whale {
 		*/
 		w_rc_t init();
 
-		void handle_listen_fd(short flags);
+		void handle_listen_fd();
 		void handle_read_from_peer(peer_t * p);
 		void handle_write_to_peer(peer_t * p);
 		void connect_to_servers();
 		void send_request_votes();
+		void send_heartbeat();
 		void process_messages(peer_t * p);
 		void process_request_vote(peer_t * p, msg_sptr msg);
 		void process_request_vote_res(peer_t * p, msg_sptr msg);
 		void process_append_entries(peer_t * p, msg_sptr msg);
 		void process_append_entries_res(peer_t * p, msg_sptr msg);
-		struct reactor * get_reactor() {return &r;};
-	private:
+		void reset_heartbeat_timer();
 		void reset_elec_timeout_event();
 		void reset_reconnect_timer(peer_t * p);
+		void turn_into_candidate();
+		void turn_into_follower();
+		void claim_leadership();
+		struct reactor * get_reactor() {return &r;};
+	private:
 		void remove_event_if_in_reactor(struct event * e);
 		void peer_cleanup(peer_t * p);
 		bool compare_log_to_local(w_int_t last_log_idx, w_int_t last_log_term);
@@ -129,10 +158,12 @@ namespace whale {
 		struct reactor                  r;
 		struct event                    listen_event;
 		struct event                    elec_timeout_event;
+		/* heartbeat timer */
+		struct event                    hb_timeout_event;
 		w_int_t                         listen_port;
 		w_addr_t                        self;
 		el_socket_t                     listen_fd;
-		w_int_t                         vote_count;
+		w_uint_t                         vote_count;
 		
 	};
 

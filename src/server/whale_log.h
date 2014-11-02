@@ -21,6 +21,7 @@ namespace whale {
 		std::string	data;
 	} log_entry_t;
 
+	typedef std::vector<log_entry_t>::iterator log_entry_it;
 	#define LOG_ENTRY_SENTINEL log_entry_t{0, 0, ""}
 
 	class logger {
@@ -46,6 +47,23 @@ namespace whale {
 		log_entry_t & get_last_log() {
 			return entries.back();
 		}
+
+		/*
+		* erase entries starting at @start and all that follow it.
+		*/
+		void chop(log_entry_it start);
+
+		/*
+		* append entries in @new_entries.
+		*/
+		void append(std::vector<log_entry_t> new_entries);
+
+		/*
+		* find the entry with index being @idx.
+		* Return: an iterator pointing to that entry, 
+		*         an iterator pointing to the end of @entries(i.e. "entries.end()").
+		*/
+		log_entry_it find_by_idx(w_int_t idx);
 	private:
 		std::string					log_file;
 		w_int_t 					fd;

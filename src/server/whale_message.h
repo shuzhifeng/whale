@@ -68,8 +68,8 @@ namespace whale {
 		bool		vote_granted;	/* true if candidate got a vote */
 	} request_vote_res_t;
 	
-	typedef std::shared_ptr<request_vote_res_t> rvs_sptr;
-	typedef std::unique_ptr<request_vote_res_t> rvs_uptr;
+	typedef std::shared_ptr<request_vote_res_t> rvr_sptr;
+	typedef std::unique_ptr<request_vote_res_t> rvr_uptr;
 	/*
 	* JSON format: 
 	* {
@@ -119,17 +119,17 @@ namespace whale {
 		bool		success;	/* true if follower contained entry matching prev_log_idx and prev_log_term*/
 	} append_entries_res_t;
 
-	typedef std::shared_ptr<append_entries_res_t> aes_sptr;
-	typedef std::unique_ptr<append_entries_res_t> aes_uptr;
+	typedef std::shared_ptr<append_entries_res_t> aer_sptr;
+	typedef std::unique_ptr<append_entries_res_t> aer_uptr;
 
-	message_t * make_message_from_request_vote(const request_vote_t & r);
-	message_t * make_message_from_request_vote_res(const request_vote_res_t & r);
-	message_t * make_message_from_append_entries(const append_entries_t & r);
-	message_t * make_message_from_append_entries_res(const append_entries_res_t & r);
+	message_t * make_msg_from_request_vote(const request_vote_t & r);
+	message_t * make_msg_from_request_vote_res(const request_vote_res_t & r);
+	message_t * make_msg_from_append_entries(const append_entries_t & r);
+	message_t * make_msg_from_append_entries_res(const append_entries_res_t & r);
 
-	request_vote_t 		* make_request_vote_from_message(const message_t & m);
-	request_vote_res_t 	* make_request_vote_res_from_message(const message_t & m);
-	append_entries_t 	* make_append_entries_from_message(const message_t & m);
-	append_entries_res_t * make_append_entries_res_from_message(const message_t & m);
+	request_vote_t 		* make_request_vote_from_msg(const message_t & m);
+	request_vote_res_t 	* make_request_vote_res_from_msg(const message_t & m);
+	append_entries_t 	* make_append_entries_from_msg(const message_t & m);
+	append_entries_res_t * make_append_entries_res_from_msg(const message_t & m);
 }
 #endif

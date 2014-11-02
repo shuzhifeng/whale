@@ -21,6 +21,10 @@ namespace whale {
 	typedef std::map<w_addr_t, peer_t>::iterator peer_it;
 	typedef std::unique_ptr<message_t>      m_uptr;
 
+	/*
+	* set @fd to nonblocking mode.
+	* Return: WHALE_GOOD on success, WHALE_ERROR on failure.
+	*/
 	static w_rc_t set_fd_nonblocking(el_socket_t fd) {
 		int flags = 0;
 
@@ -39,6 +43,10 @@ namespace whale {
 		return WHALE_GOOD;
 	}
 
+	/*
+	* create a tcp socket and listen on it.
+	* Return: file descriptor of that socket on success, -1 on failure.
+	*/
 	static el_socket_t make_listen_fd(w_addr_t * addr) {
 		el_socket_t fd;
 
@@ -63,6 +71,11 @@ namespace whale {
 		return fd;
 	}
 
+	/*
+	* connect to a peer. 
+	* if succeed, peer.conncted will be set.
+	* Return: file descriptor of that peer on success, WHALE_ERROR on failure.
+	*/
 	static el_socket_t connect_to_peer(peer_t & peer) {
 		el_socket_t fd;
 
@@ -108,7 +121,7 @@ namespace whale {
 	static void
 	server_listen_callback(el_socket_t fd, short res_flags, void *arg) {
 		whale_server * s = static_cast<whale_server *>(arg);
-		s->handle_listen_fd(res_flags);
+		s->handle_listen_fd();
 	}
 
 	/*
@@ -117,6 +130,16 @@ namespace whale {
 	static void
 	peer_callback(el_socket_t fd, short res_flags, void *arg) {
 
+	}
+
+	/*
+	* gets called to send heartbeat to servers
+	*/
+	static void
+	hearbeat_callback(el_socket_t fd, short res_flags, void *arg) {
+		whale_server * s = static_cast<whale_server*>(arg);
+		s->send_heartbeat();
+		s->reset_heartbeat_timer();
 	}
 
 	/*
@@ -142,6 +165,8 @@ namespace whale {
 	*/
 	static void
 	elec_timeout_callback(el_socket_t fd, short res_flags, void *arg) {
+		whale_server * s = static_cast<whale_server*>(arg);
+		s->turn_into_candidate();
 	}
 
 	/*
@@ -182,9 +207,15 @@ namespace whale {
 				log_error("failed to reactor_add_event "
 			              "new event: %s", ::strerror(errno));
 			}
+		} else {
+			/* reset timer */
+			peer->server->reset_reconnect_timer(peer);
 		}
 	}
 
+	/*
+	* tests whether @str is a ip string(xxx.xxx.xxx.xxx[:port]).
+	*/
 	static bool is_ip(std::string str) {
 		char *  p = ::strtok(const_cast<char*>(str.data()), ".");
 		w_int_t cnt = 0, val;
@@ -220,7 +251,8 @@ namespace whale {
 	* @last_log_idx: candidate's last log index.
 	* @last_log_term: candidate's last log term.
 	*/
-	bool whale_server::compare_log_to_local(w_int_t last_log_idx, w_int_t last_log_term) {
+	bool whale_server::compare_log_to_local(w_int_t last_log_idx,
+	                                        w_int_t last_log_term) {
 		return last_log_term > this->log->get_last_log().term ||
 			   (last_log_term == this->log->get_last_log().term &&
 			   	last_log_idx >= this->log->get_last_log().index);
@@ -229,38 +261,37 @@ namespace whale {
 	void whale_server::process_request_vote(peer_t * p, msg_sptr msg) {
 		static char dummy[50];
 
-		rv_uptr rv = rv_uptr(make_request_vote_from_message(*msg));
+		rv_uptr rv{make_request_vote_from_msg(*msg)};
 		bool    granted = false;
 
 		/*
-		* rejects if :
-		*     1. candidate's term < currentTerm
-		*     2. candidate's log is not at least as up-to-date as receiver's.
+		* grant if all of following conditions are true:
+		*     1. candidate's term >= currentTerm
+		*     2. votedFor is null(haven't voted for anyone) or the candidate in question.
+		*     3. candidate's log is at least as up-to-date as receiver's.
 		*/
-		if (rv->term < get_fmapped()->current_term) {
-			granted = false;
-			goto send_message;
-		}
-
-		/*
-		* grants if :
-		*     1. votedFor is null(first boot).
-		*     2. candidate's log is at least as up-to-date as receiver's.
-		*/
-		if (!::memcmp(&get_fmapped()->voted_for, dummy, sizeof(struct sockaddr_in))
-			|| compare_log_to_local(rv->last_log_idx, rv->last_log_term)) {
+		if (rv->term >= get_fmapped()->current_term &&
+			(!::memcmp(&get_fmapped()->voted_for, dummy,
+		               sizeof(struct sockaddr_in)) || 
+			 !::memcmp(&get_fmapped()->voted_for, &rv->candidate_id.addr,
+			           sizeof(struct sockaddr_in))) &&
+			compare_log_to_local(rv->last_log_idx, rv->last_log_term)) {
 
 			::memcpy(&get_fmapped()->voted_for, &p->addr.addr,
 			         sizeof(struct sockaddr_in));
 			get_fmapped()->current_term = rv->term;
 			this->map->sync();
 			granted = true;
+
+			/* reset election timeer event */
+			reset_elec_timeout_event();
 		}
 
-	send_message:
-
+		/*
+		* make request vote result message accordingly.
+		*/
 		msg_q_elt elt{0, 0};
-		elt.msg = msg_sptr(make_message_from_request_vote_res({
+		elt.msg = msg_sptr(make_msg_from_request_vote_res({
 				                     get_fmapped()->current_term, granted}));
 
 		p->write_queue.push(elt);
@@ -268,20 +299,171 @@ namespace whale {
 		handle_write_to_peer(p);
 	}
 
+	void whale_server::send_heartbeat() {
+		append_entries_t a;
+		a.term = get_fmapped()->current_term;
+		::memcpy(&a.leader_id.addr, &this->self.addr, sizeof(struct sockaddr_in));
+		a.prev_log_idx = this->log->get_last_log().index;
+		a.prev_log_term = this->log->get_last_log().term;
+		a.leader_commit = this->commit_index;
+
+		/* make a generic message out of append entries struct */
+		msg_sptr p = msg_sptr(make_msg_from_append_entries(a));
+
+		for (auto & it : this->servers) {
+			if (!it.second.connected) continue;
+			it.second.write_queue.push({0, 0, p});
+			handle_write_to_peer(&it.second);
+		}
+	}
+
+	void whale_server::reset_heartbeat_timer() {
+		/* 
+		*  connect is in progress or peer is not online,
+		*  setup a timer to reconnect after a period of time.
+		*/
+		struct event * hb_timeout_e = &this->hb_timeout_event;
+
+		remove_event_if_in_reactor(hb_timeout_e);
+
+		event_set(hb_timeout_e, WHLAE_HEARTBEAT_TIMEOUT, E_TIMEOUT,
+		          hearbeat_callback, this);
+
+		if (reactor_add_event(&this->r, hb_timeout_e) == -1)
+		    log_error("failed to reactor_add_event for"
+		              " hearbeat timeer event: %s", ::strerror(errno));
+	}
+	/*
+	* sends initial append entires(heartbeat) to servers to claim to 
+	* be a leader, and start a timeout event to send heartbeat repeatedly 
+	* after a period of time to prevent followers from starting a new election.
+	*/
+	void whale_server::claim_leadership() {
+		this->state = LEADER;
+		/* remove election timer */
+		remove_event_if_in_reactor(&this->elec_timeout_event);
+		send_heartbeat();
+	}
+
+	void whale_server::turn_into_follower() {
+		this->state = FOLLOWER;
+		/* start an election timer */
+		reset_elec_timeout_event();
+	}
+
 	void whale_server::process_request_vote_res(peer_t * p, msg_sptr msg) {
+		rvr_uptr rvr{make_request_vote_res_from_msg(*msg)};
+		/* no use of request for request_vote_res */
+		p->request_queue.pop();
+
+		/*
+		* ignore if current role is not candidate or 
+		* we are in a later term (we've become a leader
+		* or a follower, or we've had a collision and 
+		* started a new term).
+		*/
+		if (this->state != CANDIDATE ||
+			rvr->term < get_fmapped()->current_term) {
+			return;
+		}
+
+		if (rvr->vote_granted) {
+			if (++this->vote_count >= this->peers.size()) {
+				/* whoo, got majority of votes! */
+				claim_leadership();
+				this->vote_count = 0;
+			}
+		} else if (rvr->term >= get_fmapped()->current_term) {
+			/* a leader is elceted, turn into a follower. */
+			get_fmapped()->current_term = rvr->term;
+			this->map->sync();
+			turn_into_follower();
+			this->vote_count = 0;;
+		}
 
 	}
 
 	void whale_server::process_append_entries(peer_t * p, msg_sptr msg) {
+		ae_uptr ae{make_append_entries_from_msg(*msg)};
+		bool    success = false;
 
+		/*
+		* reply false if term < currentTerm
+		*/
+		if (ae->term < get_fmapped()->current_term) {
+			goto send_message;
+		} else if(ae->term > get_fmapped()->current_term) {
+			/* new leader, update self */
+			::memcpy(&get_fmapped()->voted_for, &p->addr.addr,
+			         sizeof(struct sockaddr_in));
+			get_fmapped()->current_term = ae->term;
+			this->map->sync();
+		}
+
+
+		if (ae->entries.empty()) { /* heartbeat message */
+			success = true;
+			goto send_message;
+		} else { /* normal appending message */
+			/* log consistency Check: 
+			*  replay false if log doesn’t contain an entry 
+			*  at prevLogIndex whose term matches prevLogTerm.
+			*/
+			log_entry_it it = this->log->find_by_idx(ae->prev_log_idx);
+
+			if (it == this->log->get_entries().end() ||
+			    it->term != ae->prev_log_term)
+				goto send_message;
+		}
+
+		/*
+		* log consistency check passed, extraneous entries deletion:
+		* If an existing entry conflicts with a new one (same index
+		* but different terms), delete the existing entry and all that
+        * follow it.
+		*/
+		for (auto & new_entry : ae->entries ) {
+			log_entry_it it = this->log->find_by_idx(new_entry.index);
+
+			if (it == this->log->get_entries().end() ||
+				it->term != new_entry.term) {
+				this->log->chop(it);
+				break;
+			}
+		}
+
+		this->log->append(ae->entries);
+		success = true;
+
+		if (ae->leader_commit > this->commit_index)
+			this->commit_index = std::min(ae->leader_commit,
+			                             ae->entries.back().index);
+	send_message:
+
+		/*
+		* make append entries result message accordingly.
+		*/
+		msg_q_elt elt{0, 0};
+		elt.msg = msg_sptr(make_msg_from_append_entries_res({
+				                     get_fmapped()->current_term, success}));
+
+		p->write_queue.push(elt);
+
+		handle_write_to_peer(p);
 	}
 
 	void whale_server::process_append_entries_res(peer_t * p, msg_sptr msg) {
+		ae_sptr req = *static_cast<ae_sptr*>(p->request_queue.back().data);
+
+		if (req->entries.empty()) {
+			/* skip heartbeat request */
+			return;
+		}
 
 	}
 
 	/*
-	* handles fully read messages from peer's read_queue
+	* handles fully read messages from peer's read_queue.
 	*/
 	void whale_server::process_messages(peer_t * p) {
 		msg_queue & q = p->read_queue;
@@ -394,7 +576,7 @@ namespace whale {
 			elt->pin += nread;
 		}
 
-		/* successfully read a entire message, create a new one for the next*/
+		/* successfully read an entire message, create a new one for the next*/
 		p->read_queue.push({0, 0, msg_sptr()});
 
 		goto again;
@@ -415,6 +597,8 @@ namespace whale {
 		*  setup a timer to reconnect after a period of time.
 		*/
 		struct event * timeout_e = &p->timeout_e;
+
+		remove_event_if_in_reactor(timeout_e);
 
 		event_set(timeout_e, WHALE_RECONNECT_TIMEOUT, E_TIMEOUT,
 		          peer_reconnect_callback, p);
@@ -472,8 +656,17 @@ namespace whale {
 			}
 		}
 	}
+
+	/*
+	* reset this local's election timer event.
+	*/
 	void whale_server::reset_elec_timeout_event() {
-		/* start timer event for election*/
+		if (event_in_reactor(&this->elec_timeout_event) &&
+			reactor_remove_event(&this->r, &this->elec_timeout_event))
+			log_error("failed to reactor_remove_event"
+			          " election timeout event: %s", ::strerror(errno));
+
+		/* start timer event with a random period of time for election*/
 		event_set(&this->elec_timeout_event,
 		          NEXT_TIMEOUT(WHALE_MIN_ELEC_TIMEOUT, WHALE_MAX_ELEC_TIMEOUT),
 		          E_TIMEOUT, elec_timeout_callback, this);
@@ -483,13 +676,26 @@ namespace whale {
 			          " election timeout event: %s", ::strerror(errno));
 	}
 
-	void whale_server::send_request_votes() {
+	/*
+	* election timeout elapsed, starts a new election.
+	*/
+	void whale_server::turn_into_candidate() {
+		/*
+		* convert to candidate, set voteFor to null, increment current term.
+		*/
 		this->state = CANDIDATE;
+		::memset(&get_fmapped()->voted_for, 0, sizeof(struct sockaddr_in));
 		this->get_fmapped()->current_term++;
 		this->map->sync();
 		this->vote_count = 1; /* vote for self */
+		/*
+		* reset elcetion timer in case of collision.
+		*/
 		this->reset_elec_timeout_event();
 
+		/*
+		* broadcasts request vote messages to to connected servers.
+		*/
 		request_vote_t rv;
 
 		rv.term = this->get_fmapped()->current_term;
@@ -497,18 +703,21 @@ namespace whale {
 		rv.last_log_idx = this->log->get_last_log().index;
 		rv.last_log_term = this->log->get_last_log().term;
 
-		msg_sptr p = msg_sptr(make_message_from_request_vote(rv));
+		/* make a generic message out of request vote struct */
+		msg_sptr p = msg_sptr(make_msg_from_request_vote(rv));
 
 		for (auto & it : this->servers) {
 			if (!it.second.connected) continue;
 			it.second.write_queue.push({0, 0, p});
+			handle_write_to_peer(&it.second);
+			it.second.request_queue.push({MESSAGE_REQUEST_VOTE, new msg_sptr{p}});
 		}
 	}
 
 	/*
-	* accept peer connection as peer may restart or restore from partition.
+	* accepts peer connection as peer may restart or restore from partition.
 	*/
-	void whale_server::handle_listen_fd(short flags) {
+	void whale_server::handle_listen_fd() {
 		w_addr_t    addr;
 		el_socket_t peer_fd;
 		socklen_t   sock_len = sizeof(struct sockaddr);

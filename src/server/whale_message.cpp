@@ -69,7 +69,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_message_from_request_vote(request_vote_t & r) {
+	make_msg_from_request_vote(request_vote_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,%s,"
 							"\"last_log_idx\":%d,"
 							"\"last_log_term\":%d}",
@@ -88,7 +88,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_message_from_request_vote_res(request_vote_res_t & r) {
+	make_msg_from_request_vote_res(request_vote_res_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,"
 							"\"vote_granted\":%s}",
 							r.term,
@@ -104,7 +104,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_message_from_append_entries(append_entries_t & r) {
+	make_msg_from_append_entries(append_entries_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,%s,"
 							"\"prev_log_idx\":%d"
 							"\"prev_log_term\":%d,"
@@ -127,7 +127,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_message_from_append_entries_res(append_entries_res_t & r) {
+	make_msg_from_append_entries_res(append_entries_res_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,"
 							"\"success\":%s}",
 							r.term,
@@ -144,7 +144,7 @@ namespace whale {
 
 
 	request_vote_t *
-	make_request_vote_from_message(const message_t & m) {
+	make_request_vote_from_msg(const message_t & m) {
 		struct xson_context              ctx;
 		struct xson_element             *root;
 		std::unique_ptr<request_vote_t>  r;
@@ -181,7 +181,7 @@ namespace whale {
 	}
 
 	request_vote_res_t *
-	make_request_vote_res_from_message(const message_t & m) {
+	make_request_vote_res_from_msg(const message_t & m) {
 		struct xson_context                  ctx;
 		struct xson_element                 *root;
 		std::unique_ptr<request_vote_res_t>  r;
@@ -207,7 +207,7 @@ namespace whale {
 	}
 
 	append_entries_t *
-	make_append_entries_from_message(const message_t & m) {
+	make_append_entries_from_msg(const message_t & m) {
 		struct xson_context                ctx;
 		struct xson_element               *root;
 		std::unique_ptr<append_entries_t>  a;
@@ -280,7 +280,7 @@ namespace whale {
 	}
 
 	append_entries_res_t *
-	make_append_entries_res_from_message(const message_t & m) {
+	make_append_entries_res_from_msg(const message_t & m) {
 		struct xson_context                    ctx;
 		struct xson_element                   *root;
 		std::unique_ptr<append_entries_res_t>  a;

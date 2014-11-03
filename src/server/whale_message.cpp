@@ -253,12 +253,12 @@ namespace whale {
 
 			sprintf(expr_buf, "entries[%d].term", i);
 
-			if (xson_get_intptr_by_expr(root, expr_buf, &a->entries.back().term))
+			if (xson_get_intptr_by_expr(root, expr_buf, (intptr_t*)&a->entries.back().term))
 				return nullptr;
 
 			sprintf(expr_buf, "entries[%d].index", i);
 
-			if (xson_get_intptr_by_expr(root, expr_buf, &a->entries.back().index))
+			if (xson_get_intptr_by_expr(root, expr_buf, (intptr_t*)&a->entries.back().index))
 				return nullptr;
 
 			sprintf(expr_buf, "entries[%d].data", i);

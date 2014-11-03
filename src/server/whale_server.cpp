@@ -129,7 +129,16 @@ namespace whale {
 	*/
 	static void
 	peer_callback(el_socket_t fd, short res_flags, void *arg) {
+		peer_t       *peer = static_cast<peer_t*>(arg);
+		whale_server *s = peer->server;
 
+		if (res_flags & E_READ) {
+			s->handle_read_from_peer(peer);
+		}
+
+		if (res_flags & E_WRITE) {
+			s->handle_write_to_peer(peer);
+		}
 	}
 
 	/*
@@ -188,7 +197,7 @@ namespace whale {
 
 			struct event * e = &peer->e;
 
-			event_set(e, fd, E_READ, server_callback, peer);
+			event_set(e, fd, E_READ | E_WRITE, server_callback, peer);
 
 			if (reactor_remove_event(peer->server->get_reactor(),
 			                         &peer->timeout_e) == -1)
@@ -437,7 +446,7 @@ namespace whale {
 
 		if (ae->leader_commit > this->commit_index)
 			this->commit_index = std::min(ae->leader_commit,
-			                             ae->entries.back().index);
+			                              (w_int_t)ae->entries.back().index);
 	send_message:
 
 		/*
@@ -747,7 +756,7 @@ namespace whale {
 
 		remove_event_if_in_reactor(&it->second.e);
 
-		event_set(&it->second.e, peer_fd, E_READ, peer_callback, &it->second);
+		event_set(&it->second.e, peer_fd, E_READ | E_WRITE, peer_callback, &it->second);
 
 		if (reactor_add_event(&this->r, &it->second.e) == -1)
 			log_error("failed to reactor_add_event for peer %s, fd[%d]: %s",

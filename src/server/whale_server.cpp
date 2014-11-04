@@ -403,14 +403,12 @@ namespace whale {
 			goto send_message;
 		} else if(ae->term > get_fmapped()->current_term) {
 			/* new leader, update self */
-			::memcpy(&get_fmapped()->voted_for, &p->addr.addr,
-			         sizeof(struct sockaddr_in));
 			get_fmapped()->current_term = ae->term;
 			this->map->sync();
 		}
 
-
 		if (ae->entries.empty()) { /* heartbeat message */
+			this->cur_leader = p;
 			success = true;
 			goto send_message;
 		} else { /* normal appending message */
@@ -941,6 +939,9 @@ namespace whale {
 			          this->listen_fd, ::strerror(errno));
 			return WHALE_ERROR;
 		}
+
+		/* don't know who is leader yet */
+		this->cur_leader = nullptr;
 
 		connect_to_servers();
 		reset_elec_timeout_event();

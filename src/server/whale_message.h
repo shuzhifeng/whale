@@ -2,37 +2,19 @@
 * Copyright (C) Xinjing Cho
 */
 
-#ifndef MESSAGE_H_
-#define MESSAGE_H_
+#ifndef WHALE_MESSAGE_H_
+#define WHALE_MESSAGE_H_
 #include <memory>
 #include <vector>
 
 #include <define.h>
+#include <message.h>
+#include <util.h>
 
 #include <whale_log.h>
 
 namespace whale {
 
-	#define MESSAGE_REQUEST_VOTE 		0
-	#define MESSAGE_REQUEST_VOTE_RES	1
-	#define MESSAGE_APPEND_ENTRIES		2
-	#define MESSAGE_APPEND_ENTRIES_RES	3
-
-	#define MESSAGE_PAYLOAD_LEN(m) ((m)->len - sizeof(int32_t))
-	#define MESSAGE_SIZE(m)        (::ntohl((m)->len))
-	/*
-	* Generic message sent over the network.
-	*/
-	typedef struct message_s {
-		/* the folliwing two fields are in network byte order */
-		uint32_t len;           /* size of the struct */
-		uint32_t msg_type;      /* message type */
-		char 	 data[];        /* actual payload */
-	} message_t;
-
-
-	typedef std::shared_ptr<message_t> msg_sptr;
-	typedef std::unique_ptr<message_t> msg_uptr;
 
 	/*
 	* JSON format: 

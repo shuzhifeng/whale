@@ -162,8 +162,9 @@ namespace whale {
 		struct event                    hb_timeout_event;
 		w_int_t                         listen_port;
 		w_addr_t                        self;
+		peer_t                         *cur_leader;
 		el_socket_t                     listen_fd;
-		w_uint_t                         vote_count;
+		w_uint_t                        vote_count;
 		
 	};
 

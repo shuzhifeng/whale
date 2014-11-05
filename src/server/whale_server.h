@@ -34,13 +34,14 @@ namespace whale {
 		/* reuqest message type */
 		w_int_t type;
 		/* holds that request sent to peer */
-		void * data;
+		void   *data;
 		~reply_queue_elt_s() {
 			if (type == MESSAGE_REQUEST_VOTE) 
 				delete static_cast<request_vote_t *>(data);
 			else if(type == MESSAGE_APPEND_ENTRIES)
 				delete static_cast<append_entries_t *>(data);
-
+			else if(type == MESSAGE_CMD_REQUEST)
+				delete static_cast<cmd_request_t *>(data);
 			::abort();
 		}
 	}reply_queue_elt_s;
@@ -93,6 +94,7 @@ namespace whale {
 	#define MAP_FILE_FLAGS	MAP_SHARED
 
 	#define DEFAULT_LISTEN_PORT     29999
+	#define DEFAULT_SERVING_PORT    29998
 	#define WHALE_BACKLOG           10
 	#define WHALE_MIN_ELEC_TIMEOUT  150
 	#define WHALE_MAX_ELEC_TIMEOUT  300
@@ -101,7 +103,9 @@ namespace whale {
 
 	typedef struct {
 		bool operator()(const w_addr_t &a1, const w_addr_t &a2) {
-			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr;
+			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr ||
+				   (a1.addr.sin_addr.s_addr == a2.addr.sin_addr.s_addr &&
+				   	a1.addr.sin_port < a2.addr.sin_port);
 		}
 	}WADDR_PRED;
 
@@ -124,6 +128,9 @@ namespace whale {
 		void handle_listen_fd();
 		void handle_read_from_peer(peer_t * p);
 		void handle_write_to_peer(peer_t * p);
+		void handle_serving_listen_fd();
+		void handle_read_from_client(peer_t * p);
+		void handle_write_to_client(peer_t * p);
 		void connect_to_servers();
 		void send_request_votes();
 		void send_heartbeat();
@@ -151,19 +158,24 @@ namespace whale {
 		std::unique_ptr<config> 		cfg;
 		std::string                     cfg_file;
 		std::map<w_addr_t, peer_t,
-				 WADDR_PRED>            peers, servers;
+				 WADDR_PRED>            peers, servers, clients;
 		w_int_t							state;
 		w_int_t							commit_index;
 		w_int_t							last_applied;
 		struct reactor                  r;
-		struct event                    listen_event;
 		struct event                    elec_timeout_event;
 		/* heartbeat timer */
 		struct event                    hb_timeout_event;
+		/* peer-used only */
 		w_int_t                         listen_port;
+		struct event                    listen_event;
+		el_socket_t                     listen_fd;
+		/* serving for clients */
+		w_int_t                         serving_port;
+		struct event                    serving_event;
+		el_socket_t                     serving_fd;
 		w_addr_t                        self;
 		peer_t                         *cur_leader;
-		el_socket_t                     listen_fd;
 		w_uint_t                        vote_count;
 		
 	};

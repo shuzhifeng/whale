@@ -125,6 +125,15 @@ namespace whale {
 	}
 
 	/*
+	* gets called when a peer connect to this machine.
+	*/
+	static void
+	serving_callback(el_socket_t fd, short res_flags, void *arg) {
+		whale_server * s = static_cast<whale_server *>(arg);
+		s->handle_serving_listen_fd();
+	}
+
+	/*
 	* gets called when candidate or leader sends data as a follower.
 	*/
 	static void
@@ -138,6 +147,23 @@ namespace whale {
 
 		if (res_flags & E_WRITE) {
 			s->handle_write_to_peer(peer);
+		}
+	}
+
+	/*
+	* gets called when clients send data.
+	*/
+	static void
+	client_callback(el_socket_t fd, short res_flags, void *arg) {
+		peer_t       *peer = static_cast<peer_t*>(arg);
+		whale_server *s = peer->server;
+
+		if (res_flags & E_READ) {
+			s->handle_read_from_client(peer);
+		}
+
+		if (res_flags & E_WRITE) {
+			s->handle_write_to_client(peer);
 		}
 	}
 
@@ -592,6 +618,21 @@ namespace whale {
 		process_messages(p);
 	}
 	
+	/* 
+	* read as many as messages from peer until ::read() returns EAGAIN,
+	* and start processing messages.
+	*/
+	void whale_server::handle_read_from_client(peer_t * p) {
+			
+	}
+
+	/*
+	* write as many as messages to peer until ::write() returns EAGAIN.
+	*/
+	void whale_server::handle_write_to_client(peer_t * p) {
+		
+	}
+
 	inline void 
 	whale_server::remove_event_if_in_reactor(struct event * e) {
 		if (event_in_reactor(e))
@@ -727,7 +768,7 @@ namespace whale {
 	void whale_server::handle_listen_fd() {
 		w_addr_t    addr;
 		el_socket_t peer_fd;
-		socklen_t   sock_len = sizeof(struct sockaddr);
+		socklen_t   sock_len = sizeof(struct sockaddr_in);
 		peer_it     it;
 
 		peer_fd = ::accept(listen_fd, (struct sockaddr*)&addr.addr, &sock_len);
@@ -754,10 +795,44 @@ namespace whale {
 
 		remove_event_if_in_reactor(&it->second.e);
 
-		event_set(&it->second.e, peer_fd, E_READ | E_WRITE, peer_callback, &it->second);
+		event_set(&it->second.e, peer_fd, E_READ | E_WRITE,
+		          peer_callback, &it->second);
 
 		if (reactor_add_event(&this->r, &it->second.e) == -1)
 			log_error("failed to reactor_add_event for peer %s, fd[%d]: %s",
+			          it->second.addr.name.c_str(), peer_fd, strerror(errno));
+	}
+
+	/*
+	* accepts client connections.
+	*/
+	void whale_server::handle_serving_listen_fd() {
+		w_addr_t    addr;
+		el_socket_t peer_fd;
+		socklen_t   sock_len = sizeof(struct sockaddr_in);
+		peer_it     it;
+
+		peer_fd = ::accept(listen_fd, (struct sockaddr*)&addr.addr,
+		                   &sock_len);
+
+		if (peer_fd == -1) {
+			log_error("failed to ::accept client connection: %s",
+				      ::strerror(errno));
+			return;
+		}
+		addr.name = get_peer_hostname(addr);
+		
+		this->clients.insert(std::pair<w_addr_t, peer_t>(addr, INIT_PEER));
+
+		it = this->clients.find(addr);
+
+		/* update hostname */
+		it->second.addr = addr;
+
+		event_set(&it->second.e, peer_fd, E_READ | E_WRITE, client_callback, &it->second);
+
+		if (reactor_add_event(&this->r, &it->second.e) == -1)
+			log_error("failed to reactor_add_event for client %s, fd[%d]: %s",
 			          it->second.addr.name.c_str(), peer_fd, strerror(errno));
 	}
 
@@ -848,7 +923,7 @@ namespace whale {
 		/* listen_port */
 		std::string * s_listen_port = cfg->get("listen_port");
 
-		if(s_listen_port == nullptr)
+		if (s_listen_port == nullptr)
 			listen_port = DEFAULT_LISTEN_PORT;
 		else
 			listen_port = std::stoi(*s_listen_port);
@@ -860,6 +935,22 @@ namespace whale {
 		/* end of listen_port */
 
 		this->self.name = get_peer_hostname(this->self);
+
+
+		/* serving_port */
+
+		std::string * s_serving_port = cfg->get("serving_port");
+
+		if (s_serving_port == nullptr)
+			serving_port = DEFAULT_SERVING_PORT;
+		else
+			serving_port = std::stoi(*s_serving_port);
+
+		if (serving_port < 0 || serving_port > 65535) {
+			log_error("serving_port out of range[0-65535]");
+			return WHALE_CONF_ERROR;
+		}
+		/* serving_port */
 
 		/* peers */
 		std::string * peer_ips = cfg->get("peers");
@@ -922,6 +1013,7 @@ namespace whale {
 		/* start listening event for peer connection */
 		w_addr_t    server_addr;
 
+		bzero(&server_addr.addr, sizeof(struct sockaddr_in));
 		server_addr.addr.sin_family = AF_INET;
 		server_addr.addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
 		server_addr.addr.sin_port = ::htons(listen_port);
@@ -937,6 +1029,28 @@ namespace whale {
 		if (reactor_add_event(&this->r, &this->listen_event) == -1) {
 			log_error("failed to reactor_add_event for listen_event[%d]: %s",
 			          this->listen_fd, ::strerror(errno));
+			return WHALE_ERROR;
+		}
+
+		/* start serving event for client connection */
+		w_addr_t    serving_addr;
+
+		bzero(&serving_addr.addr, sizeof(struct sockaddr_in));
+		serving_addr.addr.sin_family = AF_INET;
+		serving_addr.addr.sin_addr.s_addr = ::htonl(INADDR_ANY);
+		serving_addr.addr.sin_port = ::htons(serving_port);
+
+		if ((this->serving_fd = make_listen_fd(&serving_addr)) == -1) {
+			log_error("failed to make_listen_fd: %s", ::strerror(errno));
+			return WHALE_ERROR;
+		}
+
+		event_set(&this->serving_event, this->serving_fd, E_READ,
+		          serving_callback, this);
+
+		if (reactor_add_event(&this->r, &this->serving_event) == -1) {
+			log_error("failed to reactor_add_event for serving_event[%d]: %s",
+			          this->serving_fd, ::strerror(errno));
 			return WHALE_ERROR;
 		}
 

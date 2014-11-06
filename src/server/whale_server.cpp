@@ -108,9 +108,10 @@ namespace whale {
 		}
 		peer.connected = true;
 		return fd;
+
+
 	fail:
-		if (close(fd) == -1 && errno == EINTR);
-			goto fail;
+		TEMP_FAILURE_RETRY(close(fd));
 
 		return WHALE_ERROR;
 	}
@@ -147,23 +148,6 @@ namespace whale {
 
 		if (res_flags & E_WRITE) {
 			s->handle_write_to_peer(peer);
-		}
-	}
-
-	/*
-	* gets called when clients send data.
-	*/
-	static void
-	client_callback(el_socket_t fd, short res_flags, void *arg) {
-		peer_t       *peer = static_cast<peer_t*>(arg);
-		whale_server *s = peer->server;
-
-		if (res_flags & E_READ) {
-			s->handle_read_from_client(peer);
-		}
-
-		if (res_flags & E_WRITE) {
-			s->handle_write_to_client(peer);
 		}
 	}
 
@@ -341,6 +325,7 @@ namespace whale {
 		a.prev_log_idx = this->log->get_last_log().index;
 		a.prev_log_term = this->log->get_last_log().term;
 		a.leader_commit = this->commit_index;
+		a.heartbeat = true;
 
 		/* make a generic message out of append entries struct */
 		msg_sptr p = msg_sptr(make_msg_from_append_entries(a));
@@ -380,10 +365,13 @@ namespace whale {
 		send_heartbeat();
 	}
 
-	void whale_server::turn_into_follower() {
+	void whale_server::turn_into_follower(w_int_t term) {
+		get_fmapped()->current_term = term;
 		this->state = FOLLOWER;
+		this->vote_count = 0;
 		/* start an election timer */
 		reset_elec_timeout_event();
+		this->map->sync();
 	}
 
 	void whale_server::process_request_vote_res(peer_t * p, msg_sptr msg) {
@@ -410,10 +398,7 @@ namespace whale {
 			}
 		} else if (rvr->term >= get_fmapped()->current_term) {
 			/* a leader is elceted, turn into a follower. */
-			get_fmapped()->current_term = rvr->term;
-			this->map->sync();
-			turn_into_follower();
-			this->vote_count = 0;;
+			turn_into_follower(rvr->term);
 		}
 
 	}
@@ -486,12 +471,53 @@ namespace whale {
 	}
 
 	void whale_server::process_append_entries_res(peer_t * p, msg_sptr msg) {
-		ae_sptr req = *static_cast<ae_sptr*>(p->request_queue.back().data);
-
-		if (req->entries.empty()) {
-			/* skip heartbeat request */
+		aer_uptr aes = aer_uptr{make_append_entries_res_from_msg(*msg)};
+		
+		if (this->state != LEADER || aes->heartbeat)
 			return;
+
+		if (aes->term > get_fmapped()->current_term) {
+			/* a leader is reelceted, turn into a follower. */
+			turn_into_follower(aes->term);
+		} else if (aes->success) {
+			p->match_idx = p->next_idx++;
+		} else {
+			p->match_idx = (--p->next_idx - 1);
+
+			/* resend entries starting at p->next_idx */
+			if (this->log->get_entries().size() > 1) {
+				append_entries_t         a;
+				std::vector<log_entry_t> entries = this->log->get_entries();
+				log_entry_t             &e = entries[entries.size() - 2];
+				
+				a.prev_log_idx = e.index;
+				a.prev_log_term = e.term;
+				a.term = get_fmapped()->current_term;
+				a.leader_commit = this->commit_index;
+				::memcpy(&a.leader_id.addr, &this->self.addr, sizeof(struct sockaddr_in));
+				a.heartbeat = false;
+
+				for (size_t i = p->next_idx; i < entries.size(); ++i ) {
+					a.entries.push_back(entries[i]);
+				}
+
+				/*
+				* make request vote result message accordingly.
+				*/
+				msg_q_elt elt{0, 0};
+				elt.msg = msg_sptr{make_msg_from_append_entries(a)};
+
+				p->write_queue.push(elt);
+	
+				handle_write_to_peer(p);
+			}
 		}
+	}
+
+	void whale_server::process_cmd_request(peer_t * p, msg_sptr msg) {
+	}
+
+	void whale_server::process_cmd_request_res(peer_t * p, msg_sptr msg) {
 
 	}
 
@@ -519,6 +545,12 @@ namespace whale {
 				break;
 			case MESSAGE_APPEND_ENTRIES_RES:
 				process_append_entries_res(p, elt.msg);
+				break;
+			case MESSAGE_CMD_REQUEST:
+				process_cmd_request(p, elt.msg);
+				break;
+			case MESSAGE_CMD_REQUEST_RES:
+				process_cmd_request_res(p, elt.msg);
 				break;
 			}
 
@@ -618,20 +650,6 @@ namespace whale {
 		process_messages(p);
 	}
 	
-	/* 
-	* read as many as messages from peer until ::read() returns EAGAIN,
-	* and start processing messages.
-	*/
-	void whale_server::handle_read_from_client(peer_t * p) {
-			
-	}
-
-	/*
-	* write as many as messages to peer until ::write() returns EAGAIN.
-	*/
-	void whale_server::handle_write_to_client(peer_t * p) {
-		
-	}
 
 	inline void 
 	whale_server::remove_event_if_in_reactor(struct event * e) {
@@ -661,7 +679,10 @@ namespace whale {
 		msg_queue().swap(p->read_queue);
 		msg_queue().swap(p->write_queue);
 		remove_event_if_in_reactor(&p->e);
-		reset_reconnect_timer(p);
+		if (p->need_to_reconnect)
+			reset_reconnect_timer(p);
+
+		TEMP_FAILURE_RETRY(close(p->e.fd));
 	}
 
 	/*
@@ -771,7 +792,7 @@ namespace whale {
 		socklen_t   sock_len = sizeof(struct sockaddr_in);
 		peer_it     it;
 
-		peer_fd = ::accept(listen_fd, (struct sockaddr*)&addr.addr, &sock_len);
+		peer_fd = TEMP_FAILURE_RETRY(::accept(listen_fd,(struct sockaddr*)&addr.addr, &sock_len));
 
 		if (peer_fd == -1) {
 			log_error("failed to ::accept peer connection: %s",
@@ -783,10 +804,7 @@ namespace whale {
 
 		if (it == std::end(this->peers)) {
 			log_error("a peer not in the cfg file trying to connect, rejecting.");
-			again:
-			if (close(peer_fd) == -1 && errno == EINTR);
-				goto again;
-
+			TEMP_FAILURE_RETRY(close(peer_fd));
 			return;
 		}
 
@@ -826,10 +844,12 @@ namespace whale {
 
 		it = this->clients.find(addr);
 
+		/* client connection, no need to reconnect */
+		it->second.need_to_reconnect = false;
 		/* update hostname */
 		it->second.addr = addr;
 
-		event_set(&it->second.e, peer_fd, E_READ | E_WRITE, client_callback, &it->second);
+		event_set(&it->second.e, peer_fd, E_READ | E_WRITE, peer_callback, &it->second);
 
 		if (reactor_add_event(&this->r, &it->second.e) == -1)
 			log_error("failed to reactor_add_event for client %s, fd[%d]: %s",
@@ -973,6 +993,12 @@ namespace whale {
 			}
 
 			peer_t peer = INIT_PEER;
+
+			/*
+			* internal peer connection,
+			* must be scheduled for reconnecting after connection closed.
+			*/
+			peer.need_to_reconnect = true;
 
 			port_p = strchr(p, ':');
 

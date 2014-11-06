@@ -59,10 +59,9 @@ namespace whale {
 	message_t *
 	make_msg_from_request_vote_res(request_vote_res_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,"
-							"\"vote_granted\":%s}",
+							"\"vote_granted\":%d}",
 							r.term,
-							r.vote_granted ? "true" : "false"
-							)));
+							r.vote_granted)));
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
 		m->msg_type = ::htonl(MESSAGE_REQUEST_VOTE_RES);
@@ -78,14 +77,15 @@ namespace whale {
 							"\"prev_log_idx\":%d"
 							"\"prev_log_term\":%d,"
 							"%s,"
-							"\"leader_commit\":%d}",
+							"\"leader_commit\":%d,}"
+							"\"heartbeat\": %d}",
 							r.term,
 							std::move(w_addr_to_json("leader_id", r.leader_id)).c_str(),
 							r.prev_log_idx,
 							r.prev_log_term,
 							std::move(log_entries_to_json("entries", r.entries)).c_str(),
-							r.leader_commit
-							)));
+							r.leader_commit,
+							r.heartbeat)));
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
 		m->msg_type = ::htonl(MESSAGE_APPEND_ENTRIES);
@@ -98,10 +98,12 @@ namespace whale {
 	message_t *
 	make_msg_from_append_entries_res(append_entries_res_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,"
-							"\"success\":%s}",
+							"\"success\":%d"
+							"\"heartbeat\":%d}",
 							r.term,
-							r.success ? "true" : "false"
-							)));
+							r.success,
+							r.heartbeat)));
+
 		message_t * m = reinterpret_cast<message_t *>(new char[sizeof(message_t) + json.size()]);
 
 		m->msg_type = ::htonl(MESSAGE_APPEND_ENTRIES_RES);
@@ -184,6 +186,7 @@ namespace whale {
 		char                               expr_buf[50] = {0};
 		w_int_t                            port;
 		w_int_t                            array_size;
+		w_int_t                            heartbeat;
 
 		if (xson_init(&ctx, m.data))
 			return nullptr;
@@ -209,8 +212,12 @@ namespace whale {
 		if (xson_get_intptr_by_expr(root, "leader_id.port", &port))
 			return nullptr;
 
+		if (xson_get_intptr_by_expr(root, "heartbeat", &heartbeat))
+			return nullptr;
+
 		inet_aton(ip_buf, &a->leader_id.addr.sin_addr);
 		a->leader_id.addr.sin_port = ::htons(port);
+		a->heartbeat = heartbeat;
 
 		array_size = xson_get_arraysize_by_expr(root, "entries");
 
@@ -254,6 +261,7 @@ namespace whale {
 		struct xson_element                   *root;
 		std::unique_ptr<append_entries_res_t>  a;
 		w_int_t                                success;
+		w_int_t                                heartbeat;
 
 		if (xson_init(&ctx, m.data))
 			return nullptr;
@@ -269,7 +277,11 @@ namespace whale {
 		if (xson_get_intptr_by_expr(root, "success", &success))
 			return nullptr;
 
+		if (xson_get_intptr_by_expr(root, "heartbeat", &heartbeat))
+			return nullptr;
+
 		a->success = success;
+		a->heartbeat = heartbeat;
 
 		return a.release();
 	}

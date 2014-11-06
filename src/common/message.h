@@ -34,11 +34,17 @@ namespace whale {
 	typedef struct cmd_request_s {
 		std::string cmd;
 	} cmd_request_t;
+	
+	typedef std::shared_ptr<cmd_request_t> cmd_sptr;
+	typedef std::unique_ptr<cmd_request_t> cmd_uptr;
 
 	typedef struct cmd_reuqest_res_s {
 		w_addr_t    leader;
 		bool        res;
 	} cmd_request_res_t;
+
+	typedef std::shared_ptr<cmd_request_res_t> cmdr_sptr;
+	typedef std::unique_ptr<cmd_request_res_t> cmdr_uptr;
 
 	message_t * make_msg_from_cmd_request(const cmd_request_t & c);
 	message_t * make_msg_from_cmd_request_res(const cmd_request_res_t & cr);

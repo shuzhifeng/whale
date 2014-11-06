@@ -84,6 +84,7 @@ namespace whale {
 		w_int_t					prev_log_term;	/* term of prev_log_idx entry */
 		std::vector<log_entry> 	entries;		/* log entries to store (empty for heartbeat message) */
 		w_int_t					leader_commit;	/* leader's commit_idx */
+		bool                    heartbeat;      /* if this is a hearbeat request */
 	} append_entries_t;
 
 	typedef std::shared_ptr<append_entries_t> ae_sptr;
@@ -98,6 +99,7 @@ namespace whale {
 	*/
 	typedef struct append_entries_res_s {
 		w_int_t		term;		/* current term on the server, for candidate to update itself */
+		bool        heartbeat;  /* if this is a hearbeat reply */
 		bool		success;	/* true if follower contained entry matching prev_log_idx and prev_log_term*/
 	} append_entries_res_t;
 

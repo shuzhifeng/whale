@@ -33,7 +33,7 @@ namespace whale {
 	typedef struct reply_queue_elt_s {
 		/* reuqest message type */
 		w_int_t type;
-		/* holds that request sent to peer */
+		/* holds request that sent to peer */
 		void   *data;
 		~reply_queue_elt_s() {
 			if (type == MESSAGE_REQUEST_VOTE) 
@@ -59,6 +59,8 @@ namespace whale {
 		whale_server   *server;
 		/* if the peer is connected */
 		bool            connected;
+		/* should we reset reconnect timer after connection closed ? */
+		bool            need_to_reconnect;
 		/* messages read from peer */
 		msg_queue       read_queue;
 		/* messages to be written to peer */
@@ -70,14 +72,15 @@ namespace whale {
 		wait_queue      request_queue;
 	} peer_t;
 
-	#define INIT_PEER    {  \
-		.addr =  {{0}, ""}, \
-		.e = {0},           \
-		.timeout_e = {0},   \
-		.next_idx = 0,      \
-		.match_idx = 0,     \
-		.server = 0,        \
-		.connected = 0      \
+	#define INIT_PEER    {      \
+		.addr =  {{0}, ""},     \
+		.e = {0},               \
+		.timeout_e = {0},       \
+		.next_idx = 0,          \
+		.match_idx = 0,         \
+		.server = 0,            \
+		.connected = 0,         \
+		.need_to_reconnect = 0  \
 	}
 
 	/* stuff need to stay persistent on disk*/
@@ -131,19 +134,23 @@ namespace whale {
 		void handle_serving_listen_fd();
 		void handle_read_from_client(peer_t * p);
 		void handle_write_to_client(peer_t * p);
+
 		void connect_to_servers();
-		void send_request_votes();
 		void send_heartbeat();
+
 		void process_messages(peer_t * p);
 		void process_request_vote(peer_t * p, msg_sptr msg);
 		void process_request_vote_res(peer_t * p, msg_sptr msg);
 		void process_append_entries(peer_t * p, msg_sptr msg);
 		void process_append_entries_res(peer_t * p, msg_sptr msg);
+		void process_cmd_request(peer_t *p, msg_sptr msg);
+		void process_cmd_request_res(peer_t *p, msg_sptr msg);
+
 		void reset_heartbeat_timer();
 		void reset_elec_timeout_event();
 		void reset_reconnect_timer(peer_t * p);
 		void turn_into_candidate();
-		void turn_into_follower();
+		void turn_into_follower(w_int_t term);
 		void claim_leadership();
 		struct reactor * get_reactor() {return &r;};
 	private:

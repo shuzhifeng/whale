@@ -391,7 +391,7 @@ namespace whale {
 		}
 
 		if (rvr->vote_granted) {
-			if (++this->vote_count >= this->peers.size()) {
+			if (++this->vote_count > (this->peers.size() + 1) / 2) {
 				/* whoo, got majority of votes! */
 				claim_leadership();
 				this->vote_count = 0;
@@ -470,6 +470,123 @@ namespace whale {
 		handle_write_to_peer(p);
 	}
 
+	void whale_server::push_append_entries(peer_t * p, size_t start) {
+		append_entries_t         a;
+		std::vector<log_entry_t> entries = this->log->get_entries();
+		log_entry_t             &e = entries[entries.size() - 2];
+		
+		a.prev_log_idx = e.index;
+		a.prev_log_term = e.term;
+		a.term = get_fmapped()->current_term;
+		a.leader_commit = this->commit_index;
+		::memcpy(&a.leader_id.addr, &this->self.addr, sizeof(struct sockaddr_in));
+		a.heartbeat = false;
+
+		for (size_t i = start; i < entries.size(); ++i ) {
+			a.entries.push_back(entries[i]);
+		}
+
+		/*
+		* make request vote result message accordingly.
+		*/
+		msg_q_elt elt{0, 0};
+		elt.msg = msg_sptr{make_msg_from_append_entries(a)};
+
+		p->write_queue.push(elt);
+	}
+
+	/**
+	* If there exists an N such that N > commitIndex, a majority
+	* of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+	* set commitIndex = N.
+	*/
+	void whale_server::leader_adjust_commit_index() {
+		std::vector<log_entry_t> &entries = this->log->get_entries();
+		w_int_t                   min_n = this->log->get_last_log().index;
+		w_int_t                   max_n = -1;
+
+		for (auto & it : this->servers) {
+			if (it.second.match_idx > this->commit_index) {
+				log_entry_it eit = this->log->find_by_idx(it.second.match_idx);
+
+				if (eit != entries.end() &&
+				    eit->term == get_fmapped()->current_term) {
+					min_n = std::min(it.second.match_idx, min_n);
+					max_n = std::max(it.second.match_idx, max_n);
+				}
+			}
+		}
+
+		for (w_int_t i = max_n; i >= min_n; --i) {
+			w_uint_t maj = 0;
+			for (auto & it : this->servers) {
+				if (it.second.match_idx > i) {
+					++maj;
+				}
+			}
+
+			if (maj + 1 > (this->servers.size() + 1) / 2) {
+				this->commit_index = i;
+				break;
+			}
+		}
+
+	}
+
+
+	void whale_server::apply_log() {
+		if (this->commit_index > this->last_applied) {
+			this->last_applied = this->commit_index;
+			this->log->commit_until(this->commit_index);
+		}
+	}
+
+	/*
+	* notify client that a command message has been 
+	* succesfully processed by the system.
+	*/
+	void whale_server::reply_success_to_client(peer_t * client) {
+		cmd_request_res_t cmdr;
+		cmdr.res = true;
+
+		message_queue_elt_s elt{0, 0};
+		elt.msg = msg_sptr{make_msg_from_cmd_request_res(cmdr)};
+
+		client->write_queue.push(elt);
+
+		this->handle_write_to_peer(client);
+	}
+
+	void whale_server::reply_redirect_to_client(peer_t * client) {
+		cmd_request_res_t cmdr;
+		cmdr.res = false;
+
+		if (this->cur_leader != nullptr) {
+			::memcpy(&cmdr.leader.addr, 
+				     &this->cur_leader->addr.addr,
+				     sizeof(struct sockaddr_in));
+		}
+
+		message_queue_elt_s elt{0, 0};
+		elt.msg = msg_sptr{make_msg_from_cmd_request_res(cmdr)};
+
+		client->write_queue.push(elt);
+
+		this->handle_write_to_peer(client);
+	}
+
+	void whale_server::reply_clients() {
+		for (auto & it : this->clients) {
+			/* a command in process */
+			if (it.second.cur_cmd.use_count()) {
+				if (it.second.cur_cmd->term <= get_fmapped()->current_term &&
+					it.second.cur_cmd->index <= this->last_applied) {
+					reply_success_to_client(&it.second);
+					it.second.cur_cmd.reset();
+				}
+			}
+		}
+	}
 	void whale_server::process_append_entries_res(peer_t * p, msg_sptr msg) {
 		aer_uptr aes = aer_uptr{make_append_entries_res_from_msg(*msg)};
 		
@@ -481,44 +598,59 @@ namespace whale {
 			turn_into_follower(aes->term);
 		} else if (aes->success) {
 			p->match_idx = p->next_idx++;
+			leader_adjust_commit_index();
+			apply_log();
+			reply_clients();
 		} else {
 			p->match_idx = (--p->next_idx - 1);
 
 			/* resend entries starting at p->next_idx */
 			if (this->log->get_entries().size() > 1) {
-				append_entries_t         a;
-				std::vector<log_entry_t> entries = this->log->get_entries();
-				log_entry_t             &e = entries[entries.size() - 2];
-				
-				a.prev_log_idx = e.index;
-				a.prev_log_term = e.term;
-				a.term = get_fmapped()->current_term;
-				a.leader_commit = this->commit_index;
-				::memcpy(&a.leader_id.addr, &this->self.addr, sizeof(struct sockaddr_in));
-				a.heartbeat = false;
-
-				for (size_t i = p->next_idx; i < entries.size(); ++i ) {
-					a.entries.push_back(entries[i]);
-				}
-
-				/*
-				* make request vote result message accordingly.
-				*/
-				msg_q_elt elt{0, 0};
-				elt.msg = msg_sptr{make_msg_from_append_entries(a)};
-
-				p->write_queue.push(elt);
-	
+				push_append_entries(p, p->next_idx);
 				handle_write_to_peer(p);
 			}
 		}
 	}
 
-	void whale_server::process_cmd_request(peer_t * p, msg_sptr msg) {
+	void whale_server::send_append_entries() {
+		log_entry_t & last = this->log->get_last_log();
+
+		/**
+		* If last log index ≥ nextIndex for a follower: send
+		* AppendEntries RPC with log entries starting at nextIndex
+		*/
+		for (auto & it : this->servers) {
+			if (it.second.next_idx < last.index) {
+				push_append_entries(&it.second, it.second.next_idx);
+				handle_write_to_peer(&it.second);
+			}
+		}
 	}
 
-	void whale_server::process_cmd_request_res(peer_t * p, msg_sptr msg) {
+	void whale_server::process_cmd_request(peer_t * p) {
+		p->cur_cmd = p->c_queue.front();
+		p->c_queue.pop();
 
+		/* redirect client to real leader */
+		if (this->state != LEADER) {
+			p->cur_cmd.reset();
+			reply_redirect_to_client(p);
+
+			return;
+		}
+
+		log_entry_t &e = this->log->get_last_log();
+		
+		this->log->get_entries().push_back({e.index + 1, 
+			                                get_fmapped()->current_term, 
+			                                p->cur_cmd->cmd});
+		/*
+		* for future reply to client.
+		*/
+		p->cur_cmd->index = e.index + 1;
+		p->cur_cmd->term = get_fmapped()->current_term;
+
+		send_append_entries();
 	}
 
 	/*
@@ -547,10 +679,10 @@ namespace whale {
 				process_append_entries_res(p, elt.msg);
 				break;
 			case MESSAGE_CMD_REQUEST:
-				process_cmd_request(p, elt.msg);
-				break;
-			case MESSAGE_CMD_REQUEST_RES:
-				process_cmd_request_res(p, elt.msg);
+				p->c_queue.push(cmd_sptr{make_cmd_request_from_msg(*elt.msg.get())});
+				if (p->cur_cmd.get() == nullptr) {
+					process_cmd_request(p);
+				}
 				break;
 			}
 

@@ -61,6 +61,10 @@ namespace whale {
 		bool            connected;
 		/* should we reset reconnect timer after connection closed ? */
 		bool            need_to_reconnect;
+		/* client used only: is there any previous cmd request to be completed? */
+		cmd_sptr        cur_cmd;
+		/* queued cmd requests sent by client */
+		cmd_queue       c_queue;
 		/* messages read from peer */
 		msg_queue       read_queue;
 		/* messages to be written to peer */
@@ -137,14 +141,20 @@ namespace whale {
 
 		void connect_to_servers();
 		void send_heartbeat();
+		void push_append_entries(peer_t * p, size_t start);
+		void send_append_entries();
+		void reply_success_to_client(peer_t * client);
+		void reply_redirect_to_client(peer_t * client);
+		void reply_clients();
+		void leader_adjust_commit_index();
+		void apply_log();
 
 		void process_messages(peer_t * p);
 		void process_request_vote(peer_t * p, msg_sptr msg);
 		void process_request_vote_res(peer_t * p, msg_sptr msg);
 		void process_append_entries(peer_t * p, msg_sptr msg);
 		void process_append_entries_res(peer_t * p, msg_sptr msg);
-		void process_cmd_request(peer_t *p, msg_sptr msg);
-		void process_cmd_request_res(peer_t *p, msg_sptr msg);
+		void process_cmd_request(peer_t *p);
 
 		void reset_heartbeat_timer();
 		void reset_elec_timeout_event();

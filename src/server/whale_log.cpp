@@ -152,6 +152,7 @@ namespace whale {
 		}
 
 		if (p.get()) {
+			::fdatasync(this->fd);
 			this->pos = ::lseek(this->fd, 0, SEEK_CUR);
 		}
 	}

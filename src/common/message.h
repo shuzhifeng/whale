@@ -4,6 +4,7 @@
 
 #ifndef MESSAGE_H_
 #define MESSAGE_H_
+#include <queue>
 
 #include <define.h>
 
@@ -33,10 +34,13 @@ namespace whale {
 
 	typedef struct cmd_request_s {
 		std::string cmd;
+		w_int_t     index;
+		w_int_t     term;
 	} cmd_request_t;
 	
 	typedef std::shared_ptr<cmd_request_t> cmd_sptr;
 	typedef std::unique_ptr<cmd_request_t> cmd_uptr;
+	typedef std::queue<cmd_sptr>           cmd_queue;
 
 	typedef struct cmd_reuqest_res_s {
 		w_addr_t    leader;

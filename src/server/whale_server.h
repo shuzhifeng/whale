@@ -53,6 +53,8 @@ namespace whale {
 		struct event 	e;
 		/* timeout event to reconnect to peer */
 		struct event    timeout_e;
+		/* event of connect syscall */
+		struct event    connect_e;
 		w_int_t			next_idx;
 		w_int_t			match_idx;
 		/* back pointer to server */
@@ -80,6 +82,7 @@ namespace whale {
 		.addr =  {{0}, ""},     \
 		.e = {0},               \
 		.timeout_e = {0},       \
+		.connect_e = {0},       \
 		.next_idx = 0,          \
 		.match_idx = 0,         \
 		.server = 0,            \
@@ -110,9 +113,7 @@ namespace whale {
 
 	typedef struct {
 		bool operator()(const w_addr_t &a1, const w_addr_t &a2) {
-			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr ||
-				   (a1.addr.sin_addr.s_addr == a2.addr.sin_addr.s_addr &&
-				   	a1.addr.sin_port < a2.addr.sin_port);
+			return a1.addr.sin_addr.s_addr < a2.addr.sin_addr.s_addr;
 		}
 	}WADDR_PRED;
 
@@ -160,8 +161,9 @@ namespace whale {
 		void turn_into_follower(w_int_t term);
 		void claim_leadership();
 		struct reactor * get_reactor() {return &r;};
-	private:
 		void remove_event_if_in_reactor(struct event * e);
+		void set_up_peer_events(peer_t * p, el_socket_t fd);
+	private:
 		void peer_cleanup(peer_t * p);
 		bool compare_log_to_local(w_int_t last_log_idx, w_int_t last_log_term);
 		inline file_mapped_t * get_fmapped() {

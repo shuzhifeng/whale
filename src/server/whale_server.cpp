@@ -76,17 +76,38 @@ namespace whale {
 	}
 
 	/*
+	* asynchronous connect syscall callback
+	*/
+	static void 
+	connect_callback(el_socket_t fd, short res_flags, void *arg) {
+		peer_t *peer = static_cast<peer_t*>(arg);
+
+		if (::connect(fd, (struct sockaddr*)&peer->addr.addr,
+			          sizeof(struct sockaddr))) {
+			if (errno != EINPROGRESS) {
+				log_error("failed to ::connect to fd[%d]: %s",
+			          fd, ::strerror(errno));
+				peer->server->remove_event_if_in_reactor(&peer->connect_e);
+				TEMP_FAILURE_RETRY(close(fd));
+				return;
+			}
+			log_error("failed to ::connect to fd[%d], try later: %s",
+			          fd, ::strerror(errno));
+			return;
+		}
+
+		/* connected */
+		peer->server->set_up_peer_events(peer, fd);
+
+		peer->server->remove_event_if_in_reactor(&peer->connect_e);
+	}
+	/*
 	* connect to a peer. 
 	* if succeed, peer.conncted will be set.
 	* Return: file descriptor of that peer on success, WHALE_ERROR on failure.
 	*/
 	static el_socket_t connect_to_peer(peer_t & peer) {
 		el_socket_t        fd;
-		struct sockaddr_in cli_addr;
-		bzero(&cli_addr, sizeof(struct sockaddr_in));
-		cli_addr.sin_family = AF_INET;
-		cli_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-		cli_addr.sin_port = htons(0);
 
 		fd = ::socket(AF_INET, SOCK_STREAM, 0);
 
@@ -100,29 +121,32 @@ namespace whale {
 			goto fail;
 		}
 
-		if (::bind(fd, (struct sockaddr*)&cli_addr,
-		           sizeof(struct sockaddr))) {
-			log_error("failed to ::bind on fd[%d]: %s",
-			          fd, ::strerror(errno));
-			goto fail;
-		}
-		
 		if (::connect(fd, (struct sockaddr*)&peer.addr.addr,
 			          sizeof(struct sockaddr))) {
 			if (errno != EINPROGRESS) {
 				log_error("failed to ::connect to fd[%d]: %s",
 			          fd, ::strerror(errno));
+				goto fail;
 			}
 			log_error("failed to ::connect to fd[%d], try later: %s",
 			          fd, ::strerror(errno));
-			goto fail;
+
+			peer.server->remove_event_if_in_reactor(&peer.connect_e);
+
+			event_set(&peer.connect_e, fd, E_READ, connect_callback, &peer);
+			if (reactor_add_event(peer.server->get_reactor(), &peer.connect_e)) {
+				log_error("failed to reactor_add_event connect event: %s",
+		                  ::strerror(errno));
+				goto fail;
+			}
+			
+			return WHALE_ERROR;
 		}
 		peer.connected = true;
 		return fd;
 
-
 	fail:
-
+		peer.server->remove_event_if_in_reactor(&peer.connect_e);
 		TEMP_FAILURE_RETRY(close(fd));
 
 		return WHALE_ERROR;
@@ -215,29 +239,7 @@ namespace whale {
 		fd = connect_to_peer(*peer);
 
 		if (fd >= 0) {
-			/* connected */
-
-			struct event * e = &peer->e;
-
-			event_set(e, fd, E_READ | E_WRITE, server_callback, peer);
-
-			if (reactor_remove_event(peer->server->get_reactor(),
-			                         &peer->timeout_e) == -1)
-			    log_error("failed to reactor_remove_event "
-			              " reconnecting timer event: %s", ::strerror(errno));
-
-			/* remove @e from the reactor if @e was previously in the reactor.*/
-			if (!event_in_reactor(e) &&
-			    reactor_remove_event(peer->server->get_reactor(), e) == -1) {
-				log_error("failed to reactor_remove_event "
-			              " stale event: %s", ::strerror(errno));
-			}
-
-			/* add @e back to the reactor. */
-			if (reactor_add_event(peer->server->get_reactor(), e) == -1) {
-				log_error("failed to reactor_add_event "
-			              "new event: %s", ::strerror(errno));
-			}
+			peer->server->set_up_peer_events(peer, fd);
 		} else {
 			/* reset timer */
 			peer->server->reset_reconnect_timer(peer);
@@ -278,7 +280,30 @@ namespace whale {
 		return e->h_name;
 	}
 
+	void whale_server::set_up_peer_events(peer_t * p, el_socket_t fd) {
+		/* connected */
+		struct event * e = &p->e;
 
+		event_set(e, fd, E_READ | E_WRITE, server_callback, p);
+
+		if (reactor_remove_event(p->server->get_reactor(),
+		                         &p->timeout_e) == -1)
+		    log_error("failed to reactor_remove_event "
+		              " reconnecting timer event: %s", ::strerror(errno));
+
+		/* remove @e from the reactor if @e was previously in the reactor.*/
+		if (!event_in_reactor(e) &&
+		    reactor_remove_event(p->server->get_reactor(), e) == -1) {
+			log_error("failed to reactor_remove_event "
+		              " stale event: %s", ::strerror(errno));
+		}
+
+		/* add @e back to the reactor. */
+		if (reactor_add_event(p->server->get_reactor(), e) == -1) {
+			log_error("failed to reactor_add_event "
+		              "new event: %s", ::strerror(errno));
+		}
+	}
 	/*
 	* compare candidate's log to receiver's.
 	* Return: true if candidate's log is at least as up-to-date as receiver's, false otherwise.
@@ -1013,13 +1038,7 @@ namespace whale {
 			fd = connect_to_peer(it.second);
 
 			if (fd >= 0) {
-				struct event * e = &it.second.e;
-
-				event_set(e, fd, E_READ | E_WRITE, server_callback, &it.second);
-
-				if (reactor_add_event(&this->r, e) == -1)
-				    log_error("failed to reactor_add_event for"
-				              " peer event: %s", ::strerror(errno));
+				set_up_peer_events(&it.second, fd);
 			} else {
 				reset_reconnect_timer(&it.second);
 			}

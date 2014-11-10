@@ -96,6 +96,8 @@ namespace whale {
 			return;
 		}
 
+		log_error("connected!");
+		peer->connected = true;
 		/* connected */
 		peer->server->set_up_peer_events(peer, fd);
 
@@ -292,7 +294,7 @@ namespace whale {
 		              " reconnecting timer event: %s", ::strerror(errno));
 
 		/* remove @e from the reactor if @e was previously in the reactor.*/
-		if (!event_in_reactor(e) &&
+		if (event_in_reactor(e) &&
 		    reactor_remove_event(p->server->get_reactor(), e) == -1) {
 			log_error("failed to reactor_remove_event "
 		              " stale event: %s", ::strerror(errno));

@@ -21,6 +21,10 @@ namespace whale {
 	typedef std::map<w_addr_t, peer_t>::iterator peer_it;
 	typedef std::unique_ptr<message_t>      m_uptr;
 
+	std::random_device rd;
+
+	#define NEXT_TIMEOUT(mi, ma) ((mi) + rd() % ((ma) - (mi) + 1))
+
 	/*
 	* set @fd to nonblocking mode.
 	* Return: WHALE_GOOD on success, WHALE_ERROR on failure.
@@ -77,7 +81,12 @@ namespace whale {
 	* Return: file descriptor of that peer on success, WHALE_ERROR on failure.
 	*/
 	static el_socket_t connect_to_peer(peer_t & peer) {
-		el_socket_t fd;
+		el_socket_t        fd;
+		struct sockaddr_in cli_addr;
+		bzero(&cli_addr, sizeof(struct sockaddr_in));
+		cli_addr.sin_family = AF_INET;
+		cli_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		cli_addr.sin_port = htons(0);
 
 		fd = ::socket(AF_INET, SOCK_STREAM, 0);
 
@@ -91,7 +100,7 @@ namespace whale {
 			goto fail;
 		}
 
-		if (::bind(fd, (struct sockaddr*)&peer.addr.addr,
+		if (::bind(fd, (struct sockaddr*)&cli_addr,
 		           sizeof(struct sockaddr))) {
 			log_error("failed to ::bind on fd[%d]: %s",
 			          fd, ::strerror(errno));
@@ -104,6 +113,8 @@ namespace whale {
 				log_error("failed to ::connect to fd[%d]: %s",
 			          fd, ::strerror(errno));
 			}
+			log_error("failed to ::connect to fd[%d], try later: %s",
+			          fd, ::strerror(errno));
 			goto fail;
 		}
 		peer.connected = true;
@@ -111,6 +122,7 @@ namespace whale {
 
 
 	fail:
+
 		TEMP_FAILURE_RETRY(close(fd));
 
 		return WHALE_ERROR;
@@ -236,7 +248,10 @@ namespace whale {
 	* tests whether @str is a ip string(xxx.xxx.xxx.xxx[:port]).
 	*/
 	static bool is_ip(std::string str) {
-		char *  p = ::strtok(const_cast<char*>(str.data()), ".");
+		std::unique_ptr<char[]> b = std::unique_ptr<char[]>(new char[str.size() + 1]);
+		::strcpy(b.get(), str.c_str());
+		char *save_ptr;
+		char *p = ::strtok_r(b.get(), ".", &save_ptr);
 		w_int_t cnt = 0, val;
 
 		while (p) {
@@ -246,7 +261,7 @@ namespace whale {
 			if (val > 255 || val < 0)
 				return false;
 
-			p = ::strtok(NULL, ".");
+			p = ::strtok_r(NULL, ".", &save_ptr);
 		}
 
 		return cnt == 4;
@@ -255,7 +270,7 @@ namespace whale {
 	static const char * get_peer_hostname(w_addr_t & addr) {
 		struct hostent * e;
 
-		if ((e = gethostbyaddr(&addr.addr.sin_addr, 4, AF_INET)) == nullptr) {
+		if ((e = gethostbyaddr(&addr.addr.sin_addr, sizeof(in_addr), AF_INET)) == nullptr) {
 			log_error("error on gethostbyaddr: %s", ::hstrerror(h_errno));
 			return nullptr;
 		}
@@ -532,7 +547,6 @@ namespace whale {
 		}
 
 	}
-
 
 	void whale_server::apply_log() {
 		if (this->commit_index > this->last_applied) {
@@ -1069,7 +1083,7 @@ namespace whale {
 			return WHALE_CONF_ERROR;
 		}
 
-		inet_aton(s_listen_ip->c_str(), &this->self.addr.sin_addr);
+		this->self.addr.sin_addr.s_addr = inet_addr(s_listen_ip->c_str());
 		/* end of listen_ip */
 
 		/* listen_port */
@@ -1105,15 +1119,18 @@ namespace whale {
 		/* serving_port */
 
 		/* peers */
-		std::string * peer_ips = cfg->get("peers");
-		char        * p;
-
-		if (peer_ips == nullptr) {
+		char *p;
+		char *save_ptr;
+		if (cfg->get("peers") == nullptr) {
 			log_error("peers is required");
 			return WHALE_CONF_ERROR;
 		}
 
-		p = ::strtok(const_cast<char*>(peer_ips->data()), " ");
+		std::unique_ptr<char[]> peer_ips = std::unique_ptr<char[]>(
+			                               new char[cfg->get("peers")->size() + 1]);
+		::strcpy(peer_ips.get(), cfg->get("peers")->c_str());
+
+		p = ::strtok_r(peer_ips.get(), " ", &save_ptr);
 
 		while (p) {
 			char   *port_p;
@@ -1134,9 +1151,7 @@ namespace whale {
 
 			port_p = strchr(p, ':');
 
-			*port_p = '\0';
-
-			if (p)
+			if (port_p)
 				::sscanf(port_p + 1, "%d", &port);
 			else
 				port = listen_port;
@@ -1149,7 +1164,7 @@ namespace whale {
 			/* convert to network byte order */
 			peer.addr.addr.sin_port = ::htons(port);
 
-			::inet_aton(p, &peer.addr.addr.sin_addr);
+			peer.addr.addr.sin_addr.s_addr = ::inet_addr(p);
 
 			peer.addr.addr.sin_family = AF_INET;
 
@@ -1161,7 +1176,7 @@ namespace whale {
 
 			this->servers.insert(std::pair<w_addr_t, peer_t>(peer.addr, peer));
 
-			p = ::strtok(NULL, " ");
+			p = ::strtok_r(NULL, " ", &save_ptr);
 		}
 		/* end of peers */
 
@@ -1219,5 +1234,12 @@ namespace whale {
 		reset_elec_timeout_event();
 
 		return WHALE_GOOD;
+	}
+
+	/* crank up the reactor */
+	void whale_server::run() {
+		struct timeval timeout = {0, 100000};
+		
+		reactor_loop(&this->r, &timeout, 0);
 	}
 }

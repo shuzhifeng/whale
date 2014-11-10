@@ -14,17 +14,18 @@
 namespace whale {
 	w_rc_t file_mmap::map() {
 		bool first_boot = false;
-		fd = ::open(map_file.c_str(), MMAP_FILE_FLAGS, MMAP_FILE_MODE);
+		fd = ::open(map_file.c_str(), MMAP_FILE_FLAGS);
 
 		if (fd == -1) {
 
 			if (errno == ENOENT) {
-				fd = ::open(map_file.c_str(), MMAP_FILE_FLAGS | O_CREAT, MMAP_FILE_MODE);
+				fd = ::open(map_file.c_str(), MMAP_FILE_FLAGS | O_CREAT);
 				if (fd == -1) {
 					log_error("failed to open \"%s\" : %s", map_file.c_str(), 
 															strerror(errno));
 					return WHALE_ERROR;
 				}
+				ftruncate(fd, size);
 				first_boot = true;
 			}
 

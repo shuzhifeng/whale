@@ -89,7 +89,7 @@ namespace whale {
 
 	/* stuff need to stay persistent on disk*/
 	typedef struct file_mapped_s{
-		w_int_t 	       current_term;	/* current term */
+		int32_t 	       current_term;	/* current term */
 		struct sockaddr_in voted_for;		/* candidate veted for */
 	} file_mapped_t;
 
@@ -116,10 +116,6 @@ namespace whale {
 		}
 	}WADDR_PRED;
 
-	std::random_device rd;
-
-	#define NEXT_TIMEOUT(mi, ma) ((mi) + rd() % ((ma) - (mi) + 1))
-
 	class whale_server {
 	public:
 
@@ -131,7 +127,8 @@ namespace whale {
 		* Return: WHALE_GOOD on success, WHALE_ERROR on failure.
 		*/
 		w_rc_t init();
-
+		void run();
+		
 		void handle_listen_fd();
 		void handle_read_from_peer(peer_t * p);
 		void handle_write_to_peer(peer_t * p);
@@ -194,7 +191,6 @@ namespace whale {
 		w_addr_t                        self;
 		peer_t                         *cur_leader;
 		w_uint_t                        vote_count;
-		
 	};
 
 }

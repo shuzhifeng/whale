@@ -38,7 +38,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_msg_from_request_vote(request_vote_t & r) {
+	make_msg_from_request_vote(const request_vote_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,%s,"
 							"\"last_log_idx\":%d,"
 							"\"last_log_term\":%d}",
@@ -57,7 +57,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_msg_from_request_vote_res(request_vote_res_t & r) {
+	make_msg_from_request_vote_res(const request_vote_res_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,"
 							"\"vote_granted\":%d}",
 							r.term,
@@ -72,7 +72,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_msg_from_append_entries(append_entries_t & r) {
+	make_msg_from_append_entries(const append_entries_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,%s,"
 							"\"prev_log_idx\":%d"
 							"\"prev_log_term\":%d,"
@@ -96,7 +96,7 @@ namespace whale {
 	}
 
 	message_t *
-	make_msg_from_append_entries_res(append_entries_res_t & r) {
+	make_msg_from_append_entries_res(const append_entries_res_t & r) {
 		std::string  json(std::move(string_format("{\"term\":%d,"
 							"\"success\":%d"
 							"\"heartbeat\":%d}",
